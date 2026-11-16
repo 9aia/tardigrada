@@ -1,0 +1,14 @@
+{
+  "name": "tardigrada-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev",
+    "docs:build": "vitepress build",
+    "docs:deploy": "bunx gh-pages -d .vitepress/dist"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0",
+    "vitepress": "^1.6.3"
+  }
+}
