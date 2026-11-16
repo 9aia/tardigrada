@@ -15,5 +15,5 @@ cd "$(git rev-parse --show-toplevel)"
 
 tarsi-serve release --dir . --yes
 
-echo "released: see tags tardigrada-*-v<ver>"
+echo "released: see tag tardigrada-v<ver>"
 echo "next: tamias publish libraries/tardigrada  # ship 9aia:tardigrada@<ver> to the org registry"
