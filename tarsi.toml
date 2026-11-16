@@ -18,3 +18,10 @@ enabled = false   # ADR-0004: crates.io publishing is tamias-only
 
 [publish.ghreleases]
 enabled = false   # org releases are tag-only; capability stays for opt-in
+
+# Pack-ref sync: keep the tamias pack manifest version consistent
+# with the workspace bump inside the release commit.
+[release.sync_refs]
+rules = [
+  { files = ["libraries/tardigrada/tamias.yaml"], find = "(?m)^version: \"{old}\"", replace = "version: \"{new}\"" },
+]
