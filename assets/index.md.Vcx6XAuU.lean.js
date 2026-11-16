@@ -1,1 +1,0 @@
-import{_ as e,o as a,c as r,a0 as o}from"./chunks/framework.DmGDJU50.js";const p=JSON.parse('{"title":"tardigrada","description":"","frontmatter":{},"headers":[],"relativePath":"index.md","filePath":"index.md"}'),i={name:"index.md"};function n(d,t,s,h,l,c){return a(),r("div",null,[...t[0]||(t[0]=[o("",7)])])}const u=e(i,[["render",n]]);export{p as __pageData,u as default};
