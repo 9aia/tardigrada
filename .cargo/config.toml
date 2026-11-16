@@ -1,0 +1,4 @@
+[net]
+# The cuora-identity* deps resolve over ssh://git@github.com — let
+# the git CLI handle auth (agent/ssh keys), same as bupha.
+git-fetch-with-cli = true

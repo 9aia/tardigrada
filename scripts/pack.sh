@@ -9,6 +9,11 @@ cd "$(git rev-parse --show-toplevel)"
 
 cargo build --release -p tardigrada
 
+# Smoke the staged binary before it ships — a build that links but
+# can't exec (wrong interpreter, stripped too far) fails here, not
+# on a user's machine.
+target/release/tardigrada --version >/dev/null
+
 triple="$(rustc -vV | sed -n 's/^host: //p')"
 dest="libraries/tardigrada/tools/bin/$triple"
 mkdir -p "$dest"
