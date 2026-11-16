@@ -31,9 +31,12 @@ coverage helpers. See the crate table in
 No crates.io publish — the install path is the tamias pack
 (`libraries/tardigrada`): `scripts/pack.sh` stages the compiled
 payload and `tamias install ./libraries/tardigrada` deploys the
-`tardigrada` command. `scripts/release.sh` is run manually by an
-operator on `main`: one workspace version bump, a `tardigrada-v<ver>`
-tag via `tarsi-serve release`. After the tag the operator ships the
+`tardigrada` command. Releases are run manually by an
+operator on `main` via `tarsi-serve release --dir . --yes`
+directly (the org release plane, project ADR-0005; repo config:
+`tarsi.toml` — the per-repo `scripts/release.sh` shims were
+removed org-wide): plan → changelog → bump → tag → push. After
+the tag the operator ships the
 pack with `tamias publish libraries/tardigrada` (`9aia:tardigrada@<ver>`).
 
 ## Docs

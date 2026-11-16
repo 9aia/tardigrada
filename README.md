@@ -122,7 +122,7 @@ owns the key's lifecycle.
 - **tamias** — distribution; tardigrada ships as a `type: files`
   pack with a payload bin (no driver).
 - **myco** — work ledger (`project/` worktree).
-- **tarsi** — release plane (`scripts/release.sh` shim, `tarsi.toml`).
+- **tarsi** — release plane (`tarsi-serve release --dir .`, `tarsi.toml`).
 
 ## Docs
 

@@ -44,7 +44,7 @@ Flat `crates/` workspace — one crate today.
 | --- | --- |
 | `crates/tardigrada` (pkg `tardigrada`) | The whole tool — engine lib (`Cli`/`Cmd`, `parse`/`parse_from`/`dispatch`/`run`/`run_from`, clap + `--json` everywhere, `manifest` self-discovery) plus a thin `[[bin]]`. No driver crate: the `tardigrada` command ships as the tamias pack in `libraries/tardigrada/` — a `type: files` payload bin (`bins[].payload` → `tools/bin/<triple>/tardigrada`, staged by `scripts/pack.sh`), the `libraries/tarsi` shape |
 | `libraries/tardigrada` | The tamias pack — `tamias.yaml` declares `bins: [{name: tardigrada, payload: tools/bin/<triple>/tardigrada}]`; `tools/` is gitignored, built by `scripts/pack.sh` |
-| `scripts/` | `pack.sh` (stage payload), `release.sh` (tarsi shim), `coverage.sh` (llvm-cov) |
+| `scripts/` | `pack.sh` (stage payload), `coverage.sh` (llvm-cov) |
 
 Deps of note: `cuora-identity` + `cuora-identity-file` +
 `cuora-identity-keyring` (git-pinned to `cuora-v1.0.2` — the crates.io
@@ -76,7 +76,9 @@ cargo build --workspace && cargo test --workspace   # unit + e2e
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 scripts/pack.sh          # release tardigrada → libraries/tardigrada/tools/bin/<triple>/
-scripts/release.sh       # operator-run: tarsi-serve release shim
+tarsi-serve release --dir . --yes
+                       # operator-run: version bump + tag
+                       # (dry-run without --yes)
 scripts/coverage.sh      # llvm-cov HTML → target/llvm-cov/html
 ```
 
