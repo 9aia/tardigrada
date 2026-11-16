@@ -1,20 +1,37 @@
 //! E2E — spawn the real `tardigrada` binary. Each test gets its
 //! own temp HOME/XDG so the default-path resolution is exercised
-//! end-to-end, not just the flag path.
+//! end-to-end, not just the flag path. `TARDIGRADA_IDENTITY_BACKEND`
+//! defaults to `file` here so the keyfile assertions stay
+//! deterministic on hosts with (or without) a session keyring;
+//! backend-selection tests override it explicitly.
 #![allow(clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+/// A bogus session bus — makes `KeyringIdentity::platform()` fail
+/// with `Unavailable` deterministically, on any host.
+const NO_BUS: &str = "unix:path=/nonexistent-tardigrada-test-bus";
+
 fn tardigrada(home: &Path, args: &[&str]) -> Output {
+    tardigrada_env(home, args, &[("TARDIGRADA_IDENTITY_BACKEND", "file")])
+}
+
+fn tardigrada_env(home: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_tardigrada"));
     cmd.args(args)
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("TARDIGRADA_IDENTITY_FILE")
+        .env_remove("CUORA_IDENTITY_FILE")
+        .env_remove("ARCA_IDENTITY_FILE")
+        .env_remove("DBUS_SESSION_BUS_ADDRESS")
         // Isolate from the developer's real config even if a
         // parent env leaks through.
         .env("TARDIGRADA_IDENTITY_FILE", "");
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
     cmd.output().unwrap()
 }
 
@@ -82,6 +99,8 @@ fn init_show_export_import_roundtrip() {
     let o = tardigrada(h, &["--json", "backend"]);
     let v: serde_json::Value = serde_json::from_str(&stdout(&o)).unwrap();
     assert_eq!(v["source"], keyfile(h).display().to_string());
+    assert_eq!(v["mode"], "file");
+    assert_eq!(v["pinned"], false);
 
     // export --out writes a second keyfile (0600).
     let out_path = h.join("moved/identity.txt");
@@ -158,4 +177,132 @@ fn manifest_is_json() {
     assert!(o.status.success());
     let v: serde_json::Value = serde_json::from_str(&stdout(&o)).unwrap();
     assert_eq!(v["name"], "tardigrada");
+}
+
+#[test]
+fn backend_reports_mode_source_and_pin() {
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path();
+
+    // file mode, unpinned.
+    let o = tardigrada(h, &["--json", "backend"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert_eq!(v["backend"], "file");
+    assert_eq!(v["mode"], "file");
+    assert_eq!(v["pinned"], false);
+    assert_eq!(v["source"], keyfile(h).display().to_string());
+
+    // an explicit pin reports pinned=true and still resolves file
+    // — even under backend=keyring, with no session bus at all.
+    let custom = h.join("pin/key.txt");
+    let o = tardigrada_env(
+        h,
+        &[
+            "--json",
+            "--identity-file",
+            custom.to_str().unwrap(),
+            "backend",
+        ],
+        &[
+            ("TARDIGRADA_IDENTITY_BACKEND", "keyring"),
+            ("DBUS_SESSION_BUS_ADDRESS", NO_BUS),
+        ],
+    );
+    assert!(o.status.success(), "{}", stderr(&o));
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert_eq!(v["backend"], "file");
+    assert_eq!(v["mode"], "keyring");
+    assert_eq!(v["pinned"], true);
+    assert_eq!(v["source"], custom.display().to_string());
+}
+
+#[test]
+fn keyring_backend_fails_closed_without_a_session_store() {
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path();
+    let envs = [
+        ("TARDIGRADA_IDENTITY_BACKEND", "keyring"),
+        ("DBUS_SESSION_BUS_ADDRESS", NO_BUS),
+    ];
+
+    // init can't store into a session store that isn't there.
+    let o = tardigrada_env(h, &["init"], &envs);
+    assert!(!o.status.success());
+    assert!(
+        stderr(&o).contains("TARDIGRADA_IDENTITY_BACKEND"),
+        "{}",
+        stderr(&o)
+    );
+    // the keyfile is NOT silently created — fail closed means the
+    // file is never the fallback.
+    assert!(!keyfile(h).exists());
+
+    let o = tardigrada_env(h, &["show"], &envs);
+    assert!(!o.status.success());
+    assert!(stderr(&o).contains("backend unavailable"), "{}", stderr(&o));
+}
+
+#[test]
+fn auto_backend_falls_back_to_the_keyfile_headless() {
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path();
+    let envs = [
+        ("TARDIGRADA_IDENTITY_BACKEND", "auto"),
+        ("DBUS_SESSION_BUS_ADDRESS", NO_BUS),
+    ];
+
+    // init → keyfile with a fallback note on stderr.
+    let o = tardigrada_env(h, &["init"], &envs);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("no session keyring"), "{}", stderr(&o));
+    assert!(keyfile(h).exists());
+    let recipient = stdout(&o);
+    assert!(recipient.starts_with("age1"), "{recipient}");
+
+    // show/export read the same keyfile.
+    let o = tardigrada_env(h, &["show"], &envs);
+    assert!(o.status.success());
+    assert_eq!(stdout(&o), recipient);
+    let o = tardigrada_env(h, &["backend"], &envs);
+    assert_eq!(stdout(&o), "file");
+
+    // --json backend reports the resolved file + configured auto.
+    let o = tardigrada_env(h, &["--json", "backend"], &envs);
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert_eq!(v["backend"], "file");
+    assert_eq!(v["mode"], "auto");
+}
+
+#[test]
+fn unrecognized_backend_warns_and_defaults_to_keyring() {
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path();
+    let envs = [
+        ("TARDIGRADA_IDENTITY_BACKEND", "bogus"),
+        ("DBUS_SESSION_BUS_ADDRESS", NO_BUS),
+    ];
+    let o = tardigrada_env(h, &["show"], &envs);
+    assert!(!o.status.success());
+    // the typo is named on stderr, and the default (keyring,
+    // fail closed) applied — no silent file read.
+    assert!(
+        stderr(&o).contains("unrecognized TARDIGRADA_IDENTITY_BACKEND"),
+        "{}",
+        stderr(&o)
+    );
+    assert!(stderr(&o).contains("backend unavailable"), "{}", stderr(&o));
+}
+
+#[test]
+fn env_backend_file_roundtrip() {
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path();
+    let envs = [("TARDIGRADA_IDENTITY_BACKEND", "file")];
+    let o = tardigrada_env(h, &["init"], &envs);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(keyfile(h).exists());
+    let o = tardigrada_env(h, &["show"], &envs);
+    assert!(o.status.success());
+    assert!(stdout(&o).starts_with("age1"));
 }

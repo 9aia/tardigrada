@@ -3,8 +3,10 @@
 Age-identity lifecycle tool — the per-machine, per-human key behind
 encrypted stores. Named for the tardigrade: dormant identity that
 persists anywhere via cryptobiosis. The `tardigrada` CLI bootstraps,
-inspects, and moves a single age identity held in an
-`identity.txt`-style keyfile (mode `0600`).
+inspects, and moves a single age identity held in the platform
+session keyring (default) or an `identity.txt`-style keyfile
+(mode `0600`) — `TARDIGRADA_IDENTITY_BACKEND` picks
+`keyring`/`auto`/`file`.
 
 <!-- myco:agent-awareness -->
 
@@ -44,19 +46,23 @@ Flat `crates/` workspace — one crate today.
 | `libraries/tardigrada` | The tamias pack — `tamias.yaml` declares `bins: [{name: tardigrada, payload: tools/bin/<triple>/tardigrada}]`; `tools/` is gitignored, built by `scripts/pack.sh` |
 | `scripts/` | `pack.sh` (stage payload), `release.sh` (tarsi shim), `coverage.sh` (llvm-cov) |
 
-Deps of note: `cuora-identity` + `cuora-identity-file` (crates.io
-`0.1`) provide the `IdentitySource` port and the keyfile impl —
-tardigrada consumes them via `FileIdentity::new(<resolved path>)`
-and `cuora_identity::ensure`; it does **not** copy their code.
-`age` (default-features off) for `x25519::Identity`.
+Deps of note: `cuora-identity` + `cuora-identity-file` +
+`cuora-identity-keyring` (git-pinned to `cuora-v1.0.2` — the crates.io
+`0.1` releases are legacy, cuora crates are never published) provide
+the `IdentitySource` port and the keyfile/keyring impls —
+tardigrada consumes them via `FileIdentity::new(<resolved path>)`,
+`KeyringIdentity::platform()`, and `cuora_identity::ensure`; it does
+**not** copy their code. `age` (default-features off) for
+`x25519::Identity`.
 
 ## Boundary
 
 - tardigrada owns **identity lifecycle** — bootstrap, inspect,
   move. It never sees ciphertext, vaults, refs, or envs.
 - **cuora** owns secret materialization; tardigrada's identity is
-  what cuora vaults decrypt with — share via the same keyfile path
-  (`CUORA_IDENTITY_FILE`) or `export`/`import`.
+  what cuora vaults decrypt with — share via the same keyring entry
+  (`tardigrada/age-identity`), the same keyfile path
+  (`CUORA_IDENTITY_FILE`), or `export`/`import`.
 - **tamias** owns distribution — tardigrada ships as a `type:
   files` pack.
 - **myco** owns the `project/` ledger; **tarsi** owns releases.
@@ -117,9 +123,5 @@ gate; `cypera check` at the root enforces the docs contract.
 
 ## Future work
 
-- **Keyring backend** — `cuora-identity-keyring` exists but its
-  service name is hardcoded `"cuora"`; a tardigrada backend needs
-  either an upstream parameterization or a thin local impl. Track
-  in `project/`.
 - Passphrase-wrapped portable identities (a `cuora-identity` arm,
   per its port docs).

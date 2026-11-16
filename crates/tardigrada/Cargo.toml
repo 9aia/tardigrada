@@ -21,6 +21,7 @@ age.workspace = true
 clap.workspace = true
 cuora-identity.workspace = true
 cuora-identity-file.workspace = true
+cuora-identity-keyring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sigpipe.workspace = true

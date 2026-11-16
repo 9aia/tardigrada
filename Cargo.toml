@@ -26,10 +26,14 @@ sigpipe = "0.1"
 # age (rage's Rust impl) — the fixed crypto choice, same as cuora.
 # default-features off: binary ciphertext, sync API, light dep tree.
 age = { version = "0.12", default-features = false }
-# The identity port + file impl, published by cuora — tardigrada
-# consumes them, it does not copy them.
-cuora-identity = "0.1"
-cuora-identity-file = "0.1"
+# The identity port + impls, git-pinned to the cuora release that
+# canonicalized the tardigrada namespace (cuora-v1.0.2 = d51293db).
+# The crates.io 0.1 releases are legacy — cuora crates are never
+# published (org rule: crates.io is tamias-only). Consumed, not
+# copied: the port, the keyfile impl, and the platform keyring impl.
+cuora-identity = { git = "ssh://git@github.com/9aia/cuora.git", tag = "cuora-v1.0.2" }
+cuora-identity-file = { git = "ssh://git@github.com/9aia/cuora.git", tag = "cuora-v1.0.2" }
+cuora-identity-keyring = { git = "ssh://git@github.com/9aia/cuora.git", tag = "cuora-v1.0.2" }
 tempfile = "3"
 temp-env = "0.3"
 

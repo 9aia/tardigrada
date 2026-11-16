@@ -12,14 +12,23 @@
 //! key's *lifecycle* — bootstrap, inspect, move — never the
 //! ciphertext.
 //!
-//! v1 storage is FILE only: an `identity.txt`-style keyfile
-//! (`AGE-SECRET-KEY-…`, mode `0600`) at
-//! `$TARDIGRADA_IDENTITY_FILE` → `$XDG_CONFIG_HOME/tardigrada/
-//! identity.txt` → `~/.config/tardigrada/identity.txt`, or the
-//! `--identity-file` global flag. The port/impl come from cuora
-//! (`cuora-identity`, `cuora-identity-file`) — consumed, not
-//! copied. A keyring backend is future work (cuora-identity-keyring
-//! hardcodes the `"cuora"` service name today).
+//! Storage is backend-selected, mirroring cuora's model:
+//! `TARDIGRADA_IDENTITY_BACKEND` picks `keyring` (default — the
+//! platform session secret store, fail closed when unreachable),
+//! `auto` (keyring with keyfile fallback — the headless/CI mode),
+//! or `file` (keyfile only, never probes the store). An explicit
+//! `--identity-file`/`TARDIGRADA_IDENTITY_FILE` pin always means
+//! file and bypasses the keyring probe entirely. The port and
+//! impls come from cuora (`cuora-identity`, `cuora-identity-file`,
+//! `cuora-identity-keyring`, git-pinned) — consumed, not copied.
+//! The keyring entry is the canonical `tardigrada/age-identity`;
+//! legacy `cuora`/`arca` entries read as fallbacks.
+//!
+//! Keyfile path resolution: `--identity-file` →
+//! `TARDIGRADA_IDENTITY_FILE` → the `cuora-identity-file` default
+//! (`$XDG_CONFIG_HOME/tardigrada/identity.txt` →
+//! `~/.config/tardigrada/identity.txt`, with legacy `cuora`/`arca`
+//! keyfiles resolving first when they exist).
 
 use std::path::PathBuf;
 
@@ -27,6 +36,7 @@ use age::x25519;
 use clap::{Parser, Subcommand};
 use cuora_identity::{ensure, IdentityError, IdentitySource};
 use cuora_identity_file::FileIdentity;
+use cuora_identity_keyring::KeyringIdentity;
 use serde_json::json;
 
 /// tardigrada — the per-machine, per-human age identity behind
@@ -36,8 +46,8 @@ use serde_json::json;
 /// clobbers); `show` prints the `age1…` recipient to share with
 /// tools that seal to it; `import`/`export` move key material
 /// between files and machines; `backend` inspects storage.
-/// `--json` is honored on every verb; the keyfile is the only
-/// secret tardigrade touches.
+/// `--json` is honored on every verb; the identity key is the
+/// only secret tardigrade touches.
 #[derive(Parser)]
 #[command(name = "tardigrada", version, about, long_about)]
 pub struct Cli {
@@ -48,7 +58,9 @@ pub struct Cli {
 
     /// Identity keyfile path, overriding `$TARDIGRADA_IDENTITY_FILE`
     /// and the XDG default
-    /// (`$XDG_CONFIG_HOME/tardigrada/identity.txt`).
+    /// (`$XDG_CONFIG_HOME/tardigrada/identity.txt`). An explicit
+    /// pin always selects the file backend — the keyring is never
+    /// probed.
     #[arg(long, global = true, value_name = "PATH")]
     identity_file: Option<String>,
 
@@ -58,9 +70,11 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Bootstrap the age identity — generate + store it. Never
-    /// clobbers an existing identity: a second `init` reports the
-    /// current recipient and exits clean.
+    /// Bootstrap the age identity — generate + store it in the
+    /// configured backend. Never clobbers an existing identity: a
+    /// second `init` reports the current recipient and exits
+    /// clean. Under `keyring`/`auto` an existing keyfile identity
+    /// is adopted into the store (migration), never orphaned.
     Init,
     /// Print the `age1…` recipient of the stored identity — the
     /// value tools seal to (cuora vaults, tamias packs, rage
@@ -70,8 +84,8 @@ enum Cmd {
     Show,
     /// Adopt an existing `identity.txt`-style keyfile as this
     /// machine's identity — parses the file, stores the identity
-    /// at the configured path (overwrites whatever is there; the
-    /// old key is gone for good).
+    /// in the configured backend (overwrites whatever is there;
+    /// the old key is gone for good).
     Import {
         /// Path to the identity.txt keyfile to adopt.
         file: String,
@@ -87,8 +101,10 @@ enum Cmd {
         #[arg(long, value_name = "PATH")]
         out: Option<String>,
     },
-    /// Inspect the configured identity backend — always `file` in
-    /// v1, plus the resolved keyfile path.
+    /// Inspect the configured identity backend — the resolved
+    /// source (`keyring` or `file`), the configured mode
+    /// (`keyring`/`auto`/`file`), and whether an explicit file pin
+    /// is in effect.
     Backend,
     /// Capabilities, JSON shapes, env vars — agent self-discovery
     /// (always JSON).
@@ -149,7 +165,7 @@ where
 /// failures (missing identity, bad export target).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The identity port failed (io/parse/store).
+    /// The identity port failed (io/parse/store/unavailable).
     #[error("{0}")]
     Identity(#[from] IdentityError),
     /// No identity is stored — verbs that need one say so plainly.
@@ -165,6 +181,195 @@ pub enum Error {
     JsonStdoutExport,
 }
 
+/// Which identity backend `TARDIGRADA_IDENTITY_BACKEND` selects —
+/// cuora's model: `keyring` (default, fail closed) | `auto`
+/// (keyring → keyfile fallback) | `file` (keyfile only).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Backend {
+    Keyring,
+    Auto,
+    File,
+}
+
+impl Backend {
+    fn name(self) -> &'static str {
+        match self {
+            Backend::Keyring => "keyring",
+            Backend::Auto => "auto",
+            Backend::File => "file",
+        }
+    }
+}
+
+/// The configured backend — `TARDIGRADA_IDENTITY_BACKEND`, absent
+/// or unrecognized → `keyring` (fail closed; a typo'd opt-out gets
+/// a stderr note, never a silent surprise).
+fn configured_backend(cli: &Cli) -> Backend {
+    match std::env::var("TARDIGRADA_IDENTITY_BACKEND") {
+        Ok(v) if !v.is_empty() => match v.to_ascii_lowercase().as_str() {
+            "keyring" => Backend::Keyring,
+            "auto" => Backend::Auto,
+            "file" => Backend::File,
+            _ => {
+                note(
+                    cli,
+                    &format!("unrecognized TARDIGRADA_IDENTITY_BACKEND {v:?} — ignoring"),
+                );
+                Backend::Keyring
+            }
+        },
+        _ => Backend::Keyring,
+    }
+}
+
+/// An explicit keyfile pin — `--identity-file` or
+/// `TARDIGRADA_IDENTITY_FILE` — always means the file backend and
+/// bypasses the keyring probe entirely (no dbus round-trip).
+fn explicit_pin(cli: &Cli) -> bool {
+    cli.identity_file.as_deref().is_some_and(|p| !p.is_empty())
+        || std::env::var("TARDIGRADA_IDENTITY_FILE")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
+}
+
+/// The resolved identity source plus how it was chosen — verbs
+/// dispatch on [`Inner`], reports read `mode`/`pinned`.
+struct Source {
+    inner: Inner,
+    /// The configured `TARDIGRADA_IDENTITY_BACKEND` selection.
+    mode: Backend,
+    /// An explicit `--identity-file`/`TARDIGRADA_IDENTITY_FILE`
+    /// pin forced the file backend.
+    pinned: bool,
+}
+
+enum Inner {
+    File(FileIdentity),
+    Keyring(KeyringIdentity),
+}
+
+impl Source {
+    /// The file backend at the resolved keyfile path.
+    fn file(cli: &Cli, mode: Backend, pinned: bool) -> Self {
+        Source {
+            inner: Inner::File(FileIdentity::new(identity_path(cli))),
+            mode,
+            pinned,
+        }
+    }
+
+    fn keyring(k: KeyringIdentity, mode: Backend) -> Self {
+        Source {
+            inner: Inner::Keyring(k),
+            mode,
+            pinned: false,
+        }
+    }
+
+    fn describe(&self) -> String {
+        match &self.inner {
+            Inner::File(f) => f.describe(),
+            Inner::Keyring(k) => k.describe(),
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match &self.inner {
+            Inner::File(f) => f.kind(),
+            Inner::Keyring(k) => k.kind(),
+        }
+    }
+
+    fn store(&self, id: &x25519::Identity) -> Result<(), IdentityError> {
+        match &self.inner {
+            Inner::File(f) => f.store(id),
+            Inner::Keyring(k) => k.store(id),
+        }
+    }
+}
+
+/// Pick the identity source for this run — an explicit pin always
+/// means file; else `TARDIGRADA_IDENTITY_BACKEND` decides:
+/// `file` never probes the store, `keyring` fails closed when no
+/// session store is reachable, `auto` probes and falls back to
+/// the keyfile with a stderr note.
+fn resolve(cli: &Cli) -> Result<Source, Error> {
+    let mode = configured_backend(cli);
+    if explicit_pin(cli) {
+        if mode == Backend::Keyring {
+            note(cli, "explicit identity file pin overrides backend=keyring");
+        }
+        return Ok(Source::file(cli, mode, true));
+    }
+    match mode {
+        Backend::File => Ok(Source::file(cli, mode, false)),
+        Backend::Keyring => Ok(Source::keyring(strict_keyring()?, mode)),
+        Backend::Auto => match KeyringIdentity::platform() {
+            Ok(k) => Ok(Source::keyring(k, mode)),
+            Err(e) => {
+                // Headless is the expected case — say why the
+                // file was chosen.
+                note(
+                    cli,
+                    &format!("no session keyring reachable ({e}) — using the identity file"),
+                );
+                Ok(Source::file(cli, mode, false))
+            }
+        },
+    }
+}
+
+/// `backend=keyring` probe — reachable store or a typed
+/// `Unavailable` error, never a silent file fallback.
+fn strict_keyring() -> Result<KeyringIdentity, Error> {
+    KeyringIdentity::platform().map_err(|e| {
+        Error::Identity(IdentityError::Unavailable(format!(
+            "backend=keyring: {e} — \
+             set TARDIGRADA_IDENTITY_BACKEND=auto|file for headless/CI"
+        )))
+    })
+}
+
+/// The keyfile the file backend (and `auto` fallback) resolves.
+fn file_fallback(cli: &Cli) -> FileIdentity {
+    FileIdentity::new(identity_path(cli))
+}
+
+/// `load` with `None` → the actionable "run `tardigrada init`"
+/// error every caller that *requires* an identity shares.
+fn required(src: &dyn IdentitySource) -> Result<x25519::Identity, Error> {
+    match src.load()? {
+        Some(id) => Ok(id),
+        None => Err(Error::Missing {
+            path: src.describe(),
+        }),
+    }
+}
+
+/// Read-path load — `show`/`export`. `auto` falls back to the
+/// keyfile when the session store is reachable-but-empty or its
+/// read fails (a degraded session, not a crash); `keyring` fails
+/// closed and `file` never consults the store.
+fn load_main(cli: &Cli, src: &Source) -> Result<x25519::Identity, Error> {
+    match &src.inner {
+        Inner::File(f) => required(f),
+        Inner::Keyring(k) => match k.load() {
+            Ok(Some(id)) => Ok(id),
+            // `auto`: an empty store falls through to the keyfile.
+            Ok(None) if src.mode == Backend::Auto => required(&file_fallback(cli)),
+            Ok(None) => Err(Error::Missing { path: k.describe() }),
+            Err(e) if src.mode == Backend::Auto => {
+                note(
+                    cli,
+                    &format!("keyring identity unreadable ({e}) — using the identity file"),
+                );
+                required(&file_fallback(cli))
+            }
+            Err(e) => Err(e.into()),
+        },
+    }
+}
+
 fn execute(cli: &Cli) -> Result<i32, Error> {
     match &cli.command {
         Cmd::Manifest => {
@@ -172,28 +377,16 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
             Ok(0)
         }
         cmd => {
-            let path = identity_path(cli);
-            let src = FileIdentity::new(path.clone());
+            let src = resolve(cli)?;
             match cmd {
-                Cmd::Init => {
-                    let (id, created) = ensure(&src)?;
-                    note(
-                        cli,
-                        &format!(
-                            "{} identity at {}",
-                            if created { "created" } else { "found" },
-                            src.describe()
-                        ),
-                    );
-                    emit_identity_ex(cli, &id, &src, None, Some(created));
-                }
+                Cmd::Init => init(cli, &src)?,
                 Cmd::Show => {
-                    let id = load(&src)?;
+                    let id = load_main(cli, &src)?;
                     note(
                         cli,
                         &format!("identity: {} (backend {})", src.describe(), src.kind()),
                     );
-                    emit_identity_ex(cli, &id, &src, None, None);
+                    emit_identity(cli, &id, &src, None, None);
                 }
                 Cmd::Import { file } => {
                     let from = FileIdentity::new(file);
@@ -210,16 +403,16 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
                         cli,
                         &format!("imported {} → {}", from.describe(), src.describe()),
                     );
-                    emit_identity(cli, &id, &src, Some(from.describe()));
+                    emit_identity(cli, &id, &src, Some(from.describe()), None);
                 }
                 Cmd::Export { out: dest } => {
-                    let id = load(&src)?;
+                    let id = load_main(cli, &src)?;
                     match dest {
                         Some(p) => {
                             let dst = FileIdentity::new(p);
                             dst.store(&id)?;
                             note(cli, &format!("exported identity to {}", dst.describe()));
-                            emit_identity(cli, &id, &src, None);
+                            emit_identity(cli, &id, &src, None, None);
                         }
                         None => {
                             use age::secrecy::ExposeSecret;
@@ -237,11 +430,20 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
                     if cli.json {
                         out(&json!({
                             "backend": src.kind(),
+                            "mode": src.mode.name(),
+                            "pinned": src.pinned,
                             "source": src.describe(),
                         })
                         .to_string());
                     } else {
                         println!("{}", src.kind());
+                        if src.pinned {
+                            note(cli, "pinned by --identity-file/TARDIGRADA_IDENTITY_FILE");
+                        }
+                        note(
+                            cli,
+                            &format!("mode: {} (TARDIGRADA_IDENTITY_BACKEND)", src.mode.name()),
+                        );
                         note(cli, &format!("source: {}", src.describe()));
                     }
                 }
@@ -253,9 +455,110 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
     }
 }
 
+/// `init` — ensure against the resolved source. A keyring backend
+/// adopts an existing keyfile identity into the store (migration,
+/// the file stays as a backup); `auto` treats an unreadable store
+/// read as a degraded session and bootstraps the keyfile instead;
+/// `keyring` fails closed on a store error.
+fn init(cli: &Cli, src: &Source) -> Result<(), Error> {
+    match &src.inner {
+        Inner::File(f) => {
+            let (id, created) = ensure(f)?;
+            note(
+                cli,
+                &format!(
+                    "{} identity at {}",
+                    if created { "created" } else { "found" },
+                    f.describe()
+                ),
+            );
+            emit_identity(cli, &id, src, None, Some(created));
+        }
+        Inner::Keyring(k) => match k.load() {
+            Ok(Some(id)) => {
+                note(cli, &format!("found identity at {}", k.describe()));
+                emit_identity(cli, &id, src, None, Some(false));
+            }
+            Ok(None) => {
+                // Migration: an existing keyfile identity is
+                // imported into the store, never orphaned — its
+                // ciphertext must keep decrypting. The file stays
+                // as a backup.
+                let f = file_fallback(cli);
+                match f.load()? {
+                    Some(id) => {
+                        k.store(&id)?;
+                        note(cli, &format!("moved keyfile identity → {}", k.describe()));
+                        emit_identity_migrated(cli, &id, src, &f);
+                    }
+                    None => {
+                        let (id, created) = ensure(k)?;
+                        note(
+                            cli,
+                            &format!(
+                                "{} identity at {}",
+                                if created { "created" } else { "found" },
+                                k.describe()
+                            ),
+                        );
+                        emit_identity(cli, &id, src, None, Some(created));
+                    }
+                }
+            }
+            Err(e) => {
+                if src.mode == Backend::Keyring {
+                    // Fail closed — falling back could mint a
+                    // divergent file identity the keyring can't
+                    // decrypt.
+                    return Err(e.into());
+                }
+                note(
+                    cli,
+                    &format!("keyring identity unreadable ({e}) — using the identity file"),
+                );
+                let f = file_fallback(cli);
+                let (id, created) = ensure(&f)?;
+                note(
+                    cli,
+                    &format!(
+                        "{} identity at {}",
+                        if created { "created" } else { "found" },
+                        f.describe()
+                    ),
+                );
+                // Report the source that actually served — the
+                // file, not the unreachable keyring.
+                let file_src = Source::file(cli, src.mode, src.pinned);
+                emit_identity(cli, &id, &file_src, None, Some(created));
+            }
+        },
+    }
+    Ok(())
+}
+
+/// `init`'s migration emit — the identity now lives in the
+/// keyring, adopted from `f`'s keyfile (`migrated_from` in JSON).
+fn emit_identity_migrated(cli: &Cli, id: &x25519::Identity, src: &Source, f: &FileIdentity) {
+    if cli.json {
+        out(&json!({
+            "recipient": id.to_public().to_string(),
+            "backend": src.kind(),
+            "source": src.describe(),
+            "created": false,
+            "migrated_from": f.describe(),
+        })
+        .to_string());
+    } else {
+        println!("{}", id.to_public());
+    }
+}
+
 /// The resolved keyfile path: `--identity-file` flag →
-/// `$TARDIGRADA_IDENTITY_FILE` → `$XDG_CONFIG_HOME/tardigrada/
-/// identity.txt` → `~/.config/tardigrada/identity.txt`.
+/// `$TARDIGRADA_IDENTITY_FILE` → the `cuora-identity-file`
+/// default (`$CUORA_IDENTITY_FILE`/`$ARCA_IDENTITY_FILE` legacy
+/// overrides, then the first existing of
+/// `<config>/tardigrada|cuora|arca/identity.txt`, creation at the
+/// canonical tardigrada path).
 pub fn identity_path(cli: &Cli) -> PathBuf {
     if let Some(p) = &cli.identity_file {
         if !p.is_empty() {
@@ -267,10 +570,7 @@ pub fn identity_path(cli: &Cli) -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    let xdg = std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home().join(".config"));
-    xdg.join("tardigrada").join("identity.txt")
+    FileIdentity::default_path()
 }
 
 /// The default path with no flag — exported for docs/tests.
@@ -282,34 +582,13 @@ pub fn default_identity_path() -> PathBuf {
     })
 }
 
-/// `~` for path defaults.
-fn home() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-}
-
-/// Load the stored identity or fail with the actionable error.
-fn load(src: &FileIdentity) -> Result<x25519::Identity, Error> {
-    match src.load()? {
-        Some(id) => Ok(id),
-        None => Err(Error::Missing {
-            path: src.describe(),
-        }),
-    }
-}
-
 /// Emit the identity: recipient bare on stdout, `--json` wraps
 /// backend/source (and `created`/`imported_from` when present) in
 /// one object. Context notes go to stderr via [`note`].
-fn emit_identity(cli: &Cli, id: &x25519::Identity, src: &FileIdentity, from: Option<String>) {
-    emit_identity_ex(cli, id, src, from, None)
-}
-
-fn emit_identity_ex(
+fn emit_identity(
     cli: &Cli,
     id: &x25519::Identity,
-    src: &FileIdentity,
+    src: &Source,
     from: Option<String>,
     created: Option<bool>,
 ) {
@@ -341,17 +620,21 @@ fn manifest() -> serde_json::Value {
         "verbs": ["init", "show", "import", "export", "backend", "manifest"],
         "globals": {
             "--json": "stable machine shapes; errors are {\"error\": \"…\"} on stderr",
-            "--identity-file": "keyfile path override"
+            "--identity-file": "keyfile path override — pins the file backend"
         },
         "env": {
-            "TARDIGRADA_IDENTITY_FILE": "keyfile path override",
-            "XDG_CONFIG_HOME": "config root for the default keyfile"
+            "TARDIGRADA_IDENTITY_BACKEND": "keyring (default, fail closed — no file fallback) | auto (keyring → keyfile fallback, headless) | file (never probe the keyring)",
+            "TARDIGRADA_IDENTITY_FILE": "keyfile path override — pins the file backend",
+            "XDG_CONFIG_HOME": "config root for the default keyfile",
+            "CUORA_KEYRING_TIMEOUT_MS": "bounds one keyring op (cuora-identity-keyring); 0 waits forever"
         },
-        "backend": {
-            "file": "identity.txt keyfile, mode 0600 — the only v1 backend"
+        "backends": {
+            "keyring": "platform session secret store — entry tardigrada/age-identity (legacy cuora/arca entries read as fallbacks); default, fail closed",
+            "auto": "TARDIGRADA_IDENTITY_BACKEND=auto — keyring when reachable, keyfile fallback",
+            "file": "identity.txt keyfile, mode 0600 — opt-out via TARDIGRADA_IDENTITY_BACKEND=file"
         },
         "interop": {
-            "cuora": "point cuora at the same file (CUORA_IDENTITY_FILE) or `tardigrada export --out ~/.config/cuora/identity.txt`"
+            "cuora": "shares this identity — the same keyring entry (tardigrada/age-identity) or the same keyfile (CUORA_IDENTITY_FILE)"
         }
     })
 }
@@ -404,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_path_env_beats_xdg() {
+    fn identity_path_env_beats_default() {
         temp_env::with_vars(
             [
                 ("TARDIGRADA_IDENTITY_FILE", Some("/tmp/env-id")),
@@ -419,10 +702,12 @@ mod tests {
     }
 
     #[test]
-    fn identity_path_defaults_to_xdg_then_home() {
+    fn identity_path_defaults_to_tardigrada_canonical() {
         temp_env::with_vars(
             [
                 ("TARDIGRADA_IDENTITY_FILE", None::<&str>),
+                ("CUORA_IDENTITY_FILE", None::<&str>),
+                ("ARCA_IDENTITY_FILE", None::<&str>),
                 ("XDG_CONFIG_HOME", Some("/tmp/xdg")),
                 ("HOME", Some("/tmp/home")),
             ],
@@ -437,6 +722,8 @@ mod tests {
         temp_env::with_vars(
             [
                 ("TARDIGRADA_IDENTITY_FILE", None::<&str>),
+                ("CUORA_IDENTITY_FILE", None::<&str>),
+                ("ARCA_IDENTITY_FILE", None::<&str>),
                 ("XDG_CONFIG_HOME", None::<&str>),
                 ("HOME", Some("/tmp/home")),
             ],
@@ -455,6 +742,8 @@ mod tests {
         temp_env::with_vars(
             [
                 ("TARDIGRADA_IDENTITY_FILE", Some("")),
+                ("CUORA_IDENTITY_FILE", None::<&str>),
+                ("ARCA_IDENTITY_FILE", None::<&str>),
                 ("XDG_CONFIG_HOME", Some("/tmp/xdg")),
                 ("HOME", Some("/tmp/home")),
             ],
@@ -469,6 +758,105 @@ mod tests {
     }
 
     #[test]
+    fn backend_env_selects_the_mode() {
+        let cli = || parse_from(["tardigrada", "backend"]);
+        temp_env::with_vars(
+            [
+                ("TARDIGRADA_IDENTITY_BACKEND", None::<&str>),
+                ("TARDIGRADA_IDENTITY_FILE", Some("/tmp/pin")),
+            ],
+            || assert_eq!(configured_backend(&cli()), Backend::Keyring),
+        );
+        for (v, want) in [
+            ("keyring", Backend::Keyring),
+            ("auto", Backend::Auto),
+            ("file", Backend::File),
+            ("AUTO", Backend::Auto),
+            // unrecognized → ignored, default keyring applies
+            ("bogus", Backend::Keyring),
+        ] {
+            temp_env::with_var("TARDIGRADA_IDENTITY_BACKEND", Some(v), || {
+                assert_eq!(configured_backend(&cli()), want, "{v}");
+            });
+        }
+    }
+
+    #[test]
+    fn explicit_pin_detects_flag_and_env() {
+        temp_env::with_vars(
+            [
+                ("TARDIGRADA_IDENTITY_FILE", None::<&str>),
+                ("TARDIGRADA_IDENTITY_BACKEND", Some("keyring")),
+            ],
+            || {
+                let cli = parse_from(["tardigrada", "--identity-file", "/tmp/x", "show"]);
+                assert!(explicit_pin(&cli));
+                let cli = parse_from(["tardigrada", "show"]);
+                assert!(!explicit_pin(&cli));
+            },
+        );
+        temp_env::with_vars(
+            [
+                ("TARDIGRADA_IDENTITY_FILE", Some("/tmp/env-id")),
+                ("TARDIGRADA_IDENTITY_BACKEND", Some("keyring")),
+            ],
+            || {
+                let cli = parse_from(["tardigrada", "show"]);
+                assert!(explicit_pin(&cli));
+            },
+        );
+    }
+
+    #[test]
+    fn explicit_pin_resolves_file_without_probing_keyring() {
+        // backend=keyring + a pin → the file source, no store probe.
+        // Deterministic on every host: the pin short-circuits before
+        // KeyringIdentity::platform() is ever called.
+        temp_env::with_vars(
+            [
+                ("TARDIGRADA_IDENTITY_BACKEND", Some("keyring")),
+                ("TARDIGRADA_IDENTITY_FILE", None::<&str>),
+                ("CUORA_IDENTITY_FILE", None::<&str>),
+                ("ARCA_IDENTITY_FILE", None::<&str>),
+                ("XDG_CONFIG_HOME", Some("/tmp/xdg")),
+                ("HOME", Some("/tmp/home")),
+            ],
+            || {
+                let cli = parse_from(["tardigrada", "--identity-file", "/tmp/pin-id", "backend"]);
+                let src = resolve(&cli).unwrap();
+                assert_eq!(src.kind(), "file");
+                assert_eq!(src.describe(), "/tmp/pin-id");
+                assert!(src.pinned);
+                assert_eq!(src.mode, Backend::Keyring);
+            },
+        );
+    }
+
+    #[test]
+    fn file_backend_never_probes_the_store() {
+        temp_env::with_vars(
+            [
+                ("TARDIGRADA_IDENTITY_BACKEND", Some("file")),
+                ("TARDIGRADA_IDENTITY_FILE", None::<&str>),
+                ("CUORA_IDENTITY_FILE", None::<&str>),
+                ("ARCA_IDENTITY_FILE", None::<&str>),
+                ("XDG_CONFIG_HOME", Some("/tmp/xdg")),
+                ("HOME", Some("/tmp/home")),
+            ],
+            || {
+                let cli = parse_from(["tardigrada", "backend"]);
+                let src = resolve(&cli).unwrap();
+                assert_eq!(src.kind(), "file");
+                assert_eq!(
+                    src.describe(),
+                    "/tmp/xdg/tardigrada/identity.txt".to_string()
+                );
+                assert!(!src.pinned);
+            },
+        );
+    }
+
+    #[test]
     fn manifest_is_json_and_lists_verbs() {
         let v = manifest();
         assert_eq!(v["name"], "tardigrada");
@@ -476,33 +864,82 @@ mod tests {
         for v in ["init", "show", "import", "export", "backend"] {
             assert!(verbs.iter().any(|x| x == v), "missing {v}");
         }
+        assert!(v["env"]["TARDIGRADA_IDENTITY_BACKEND"].is_string());
     }
 
     #[test]
     fn missing_identity_is_an_actionable_error() {
         let dir = tempfile::tempdir().unwrap();
-        let cli = parse_from([
-            "tardigrada",
-            "--identity-file",
-            dir.path().join("nope.txt").to_str().unwrap(),
-            "show",
-        ]);
-        assert_eq!(dispatch(&cli), 1);
+        temp_env::with_var("TARDIGRADA_IDENTITY_BACKEND", Some("file"), || {
+            let cli = parse_from([
+                "tardigrada",
+                "--identity-file",
+                dir.path().join("nope.txt").to_str().unwrap(),
+                "show",
+            ]);
+            assert_eq!(dispatch(&cli), 1);
+        });
     }
 
     #[test]
     fn ensure_never_clobbers() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("id.txt");
-        let cli = parse_from([
-            "tardigrada",
-            "--identity-file",
-            path.to_str().unwrap(),
-            "init",
-        ]);
-        assert_eq!(dispatch(&cli), 0);
-        let first = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(dispatch(&cli), 0);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), first);
+        temp_env::with_var("TARDIGRADA_IDENTITY_BACKEND", Some("file"), || {
+            let cli = parse_from([
+                "tardigrada",
+                "--identity-file",
+                path.to_str().unwrap(),
+                "init",
+            ]);
+            assert_eq!(dispatch(&cli), 0);
+            let first = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(dispatch(&cli), 0);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), first);
+        });
+    }
+
+    #[test]
+    fn file_backend_init_show_export_import_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("id.txt");
+        let p = path.to_str().unwrap();
+        temp_env::with_vars(
+            [
+                ("TARDIGRADA_IDENTITY_BACKEND", Some("file")),
+                ("TARDIGRADA_IDENTITY_FILE", None::<&str>),
+            ],
+            || {
+                let cli = |args: &[&str]| {
+                    let mut v = vec!["tardigrada", "--identity-file", p];
+                    v.extend_from_slice(args);
+                    parse_from(v)
+                };
+                assert_eq!(dispatch(&cli(&["init"])), 0);
+                assert!(path.exists());
+                assert_eq!(dispatch(&cli(&["show"])), 0);
+                let out = dir.path().join("moved.txt");
+                let cli_export = parse_from([
+                    "tardigrada",
+                    "--identity-file",
+                    p,
+                    "export",
+                    "--out",
+                    out.to_str().unwrap(),
+                ]);
+                assert_eq!(dispatch(&cli_export), 0);
+                // import adopts the moved keyfile into the file backend
+                let other = dir.path().join("other.txt");
+                let cli_import = parse_from([
+                    "tardigrada",
+                    "--identity-file",
+                    other.to_str().unwrap(),
+                    "import",
+                    out.to_str().unwrap(),
+                ]);
+                assert_eq!(dispatch(&cli_import), 0);
+                assert!(other.exists());
+            },
+        );
     }
 }

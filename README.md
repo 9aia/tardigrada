@@ -5,13 +5,14 @@
 Named for the tardigrade — the microscopic animal that survives
 anything via cryptobiosis, suspended in a dry shell until water
 returns. tardigrada is the same idea for keys: a **per-machine,
-per-human age identity** that sleeps in an `identity.txt` keyfile
-(mode `0600`) and wakes whenever an encrypted store needs it. It is
-the key behind cuora vaults, tamias sealed packs, rage files — any
-tool that seals to an `age1…` recipient.
+per-human age identity** that sleeps in the platform session
+keyring (or an `identity.txt` keyfile, mode `0600`) and wakes
+whenever an encrypted store needs it. It is the key behind cuora
+vaults, tamias sealed packs, rage files — any tool that seals to an
+`age1…` recipient.
 
 ```
-tardigrada init      →  ~/.config/tardigrada/identity.txt (0600)
+tardigrada init      →  session keyring (default) or identity.txt (0600)
 tardigrada show      →  age1…   (the recipient you share)
 tardigrada export    →  AGE-SECRET-KEY-…  (move it anywhere)
 tardigrada import    →  adopt a keyfile from another tool/machine
@@ -39,7 +40,7 @@ cargo install --path crates/tardigrada
 
 tardigrada init        # bootstrap the identity, once per machine
 tardigrada show        # print the age1… recipient (scriptable)
-tardigrada backend     # inspect storage — always `file` in v1
+tardigrada backend     # inspect storage — keyring by default
 ```
 
 `tardigrada --help` lists every verb; `tardigrada manifest` prints
@@ -53,19 +54,35 @@ non-zero exit.
 | --- | --- |
 | `init` | Generate + store the identity. Never clobbers — a second `init` reports the current recipient. |
 | `show` | Print the `age1…` recipient to stdout (scriptable); backend/path context on stderr. Fails until `init` has run. |
-| `import <file>` | Adopt an existing `identity.txt`-style keyfile — parses it, stores the identity at the configured path (overwrites). |
+| `import <file>` | Adopt an existing `identity.txt`-style keyfile — parses it, stores the identity in the configured backend (overwrites). |
 | `export [--out PATH]` | Write the keyfile out (mode `0600`). Bare `export` prints the `AGE-SECRET-KEY-…` line to stdout — the pipeable escape hatch. |
-| `backend` | Inspect configured storage — `file` + resolved path in v1. |
+| `backend` | Inspect configured storage — resolved backend (`keyring`/`file`), mode (`keyring`/`auto`/`file`), pin state. |
 | `manifest` | Capabilities/env/JSON shapes — agent self-discovery. |
 
 ## Where the key lives
 
-Resolution order for the keyfile path:
+`TARDIGRADA_IDENTITY_BACKEND` selects the backend (cuora's model):
+
+- **`keyring`** (default) — the platform session secret store
+  (secret-service / Keychain / Credential Manager), entry
+  `tardigrada/age-identity`. **Fail closed**: no reachable store
+  is an error, never a silent keyfile read — set `auto` or `file`
+  for headless/CI.
+- **`auto`** — keyring when reachable, keyfile fallback with a
+  stderr note (the degraded-session mode).
+- **`file`** — the keyfile only; never probes the store.
+
+An explicit `--identity-file`/`TARDIGRADA_IDENTITY_FILE` pin always
+means file and bypasses the keyring probe entirely.
+
+Keyfile path resolution (the `file` backend and `auto` fallback):
 
 1. `--identity-file PATH` (global flag)
 2. `$TARDIGRADA_IDENTITY_FILE`
-3. `$XDG_CONFIG_HOME/tardigrada/identity.txt`
-4. `~/.config/tardigrada/identity.txt`
+3. the `cuora-identity-file` default — legacy `cuora`/`arca`
+   keyfiles resolve first when they exist, creation lands at
+   `$XDG_CONFIG_HOME/tardigrada/identity.txt` →
+   `~/.config/tardigrada/identity.txt`
 
 The file is an `identity.txt`-style keyfile — `#` comments plus one
 `AGE-SECRET-KEY-…` line — written mode `0600` with parent dirs
@@ -73,9 +90,18 @@ created, the same format cuora and rage read. A group/world-readable
 file warns on load but still works (ssh's strict-modes posture,
 non-fatal).
 
+**Migration:** existing keyfiles keep working — the `file` backend
+reads them (including legacy `cuora`/`arca` paths via the shared
+`cuora-identity-file` resolution). `tardigrada init` under
+`keyring`/`auto` adopts a keyfile identity into the store; or move
+material explicitly with `export`/`import`.
+
 ## cuora interop
 
-cuora vaults decrypt with an age identity too. Two ways to share:
+cuora vaults decrypt with an age identity too — and since cuora
+canonicalized identity under the tardigrada namespace, both tools
+resolve the *same* identity by default: the `tardigrada/age-identity`
+keyring entry, or the same keyfile. Two ways to share explicitly:
 
 - **Point cuora at the same file** — set `CUORA_IDENTITY_FILE` (or a
   vault's `identity` config) to tardigrada's keyfile path, or let
