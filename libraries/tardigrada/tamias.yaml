@@ -1,0 +1,28 @@
+# tardigrada — the age-identity lifecycle tool as a tamias package
+# (the `type: files` payload-bin shape, same as `libraries/tarsi`).
+#
+# `scripts/pack.sh` release-builds `tardigrada` into
+# `tools/bin/<host-triple>/` (gitignored — a build artifact) and
+# this manifest ships it as a payload bin. `tamias install
+# ./libraries/tardigrada` (or the packed `.tgz` / a registry ref)
+# deploys the `tardigrada` command onto PATH — a real binary, no
+# bins[] shim and no driver crate.
+#
+# `payload:` resolves the host triple's dir at install time, so one
+# manifest serves every platform `tools/bin/` ships a dir for; a
+# payload with no dir for this host fails the install loudly.
+name: tardigrada
+version: "0.1.0"
+type: files
+description: >-
+  Age-identity lifecycle tool — the per-machine, per-human key
+  behind encrypted stores (cuora vaults, tamias sealed packs,
+  rage files). init/show/import/export/backend over an
+  identity.txt-style keyfile; dormant identity that persists
+  anywhere.
+
+bins:
+  # The command — real binary, not a verb of a CLI shim. Deployed
+  # under its own name; the payload file keeps the same name.
+  - name: tardigrada
+    payload: tools/bin/x86_64-unknown-linux-gnu/tardigrada
