@@ -47,8 +47,8 @@ pub struct Cli {
     json: bool,
 
     /// Identity keyfile path, overriding `$TARDIGRADA_IDENTITY_FILE`
-    /// and the XDG default (`$XDG_CONFIG_HOME/tardigrada/
-    /// identity.txt`).
+    /// and the XDG default
+    /// (`$XDG_CONFIG_HOME/tardigrada/identity.txt`).
     #[arg(long, global = true, value_name = "PATH")]
     identity_file: Option<String>,
 
