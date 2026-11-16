@@ -30,6 +30,7 @@
 //! `~/.config/tardigrada/identity.txt`, with legacy `cuora`/`arca`
 //! keyfiles resolving first when they exist).
 
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use age::x25519;
@@ -421,7 +422,15 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
                             }
                             // Bare stdout export — the pipeable
                             // form: `tardigrada export > keyfile` or
-                            // into another tool's stdin.
+                            // into another tool's stdin. On a TTY the
+                            // secret lands in scrollback — warn so
+                            // the escape hatch stays deliberate.
+                            if std::io::stdout().is_terminal() {
+                                eprintln!(
+                                    "tardigrada: warning: printing the secret key to a \
+                                     terminal — prefer `export --out PATH`"
+                                );
+                            }
                             println!("{}", id.to_string().expose_secret());
                         }
                     }

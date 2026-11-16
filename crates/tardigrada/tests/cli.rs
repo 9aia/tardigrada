@@ -116,10 +116,16 @@ fn init_show_export_import_roundtrip() {
         );
     }
 
-    // bare export prints the AGE-SECRET-KEY line.
+    // bare export prints the AGE-SECRET-KEY line. Piped stdout is
+    // not a terminal, so no scrollback warning fires.
     let o = tardigrada(h, &["export"]);
     assert!(o.status.success());
     assert!(stdout(&o).starts_with("AGE-SECRET-KEY-"), "{}", stdout(&o));
+    assert!(
+        !stderr(&o).contains("terminal"),
+        "piped export must not warn: {}",
+        stderr(&o)
+    );
 
     // import into a fresh HOME adopts the exported keyfile —
     // same recipient, proving the roundtrip moved real key
