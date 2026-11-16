@@ -20,7 +20,7 @@ it writes.
 - **Distribution** — the `tardigrada` command ships as a tamias
   `type: files` pack; tamias owns install/registry.
 - **Releases** — tags and version bumps are tarsi's
-  (`scripts/release.sh` is a shim); the work ledger is myco's
+  (`tarsi-serve release --dir .`); the work ledger is myco's
   (`project/`).
 
 ## Neighbors
