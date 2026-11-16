@@ -61,6 +61,8 @@ the same file cuora and rage read.
 ## Cautions
 
 - `import` **overwrites** the current identity — no undo. Verify the
-  source file first (`head -3` shows comments + the key line).
+  source without dumping the key: `tardigrada --identity-file
+  <src> show` prints its `age1…` recipient (the secret never enters
+  context).
 - `init` is safe to re-run — it reports the existing identity.
 - `--json` on every verb; errors are `{"error": …}` on stderr.
