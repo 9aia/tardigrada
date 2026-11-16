@@ -53,9 +53,19 @@ tardigrada show         # the age1… recipient (scriptable)
   note (headless/CI).
 - `file` — the keyfile only; never probes the store.
 
-An explicit `--identity-file`/`TARDIGRADA_IDENTITY_FILE` pin always
-means file and skips the keyring probe. `tardigrada backend` reports
-the resolved backend + mode + pin state.
+An explicit `--identity-file`/`TARDIGRADA_IDENTITY_FILE` pin — or
+the legacy `CUORA_IDENTITY_FILE`/`ARCA_IDENTITY_FILE` — always
+means file and skips the keyring probe; `tardigrada backend` reports
+the resolved backend + mode + pin state. Env vars are same-uid
+trust: whoever can set them can already read the keyfile, so they
+redirect resolution freely — don't treat them as a security
+boundary.
+
+Under `--json`, routine context is suppressed but warnings are not:
+stderr carries `{"warning": "…"}` lines (backend fallbacks,
+misspelled `TARDIGRADA_IDENTITY_BACKEND`, identity replacements)
+alongside the `{"error": "…"}` failure shape. Check stderr even on
+success.
 
 **Migration:** existing keyfiles keep working — `file`/`auto` read
 them (legacy `cuora`/`arca` paths resolve too). `tardigrada init`
@@ -65,6 +75,7 @@ under `keyring`/`auto` adopts a keyfile identity into the store;
 ## Where the keyfile lives
 
 `--identity-file` → `TARDIGRADA_IDENTITY_FILE` →
+`$CUORA_IDENTITY_FILE`/`$ARCA_IDENTITY_FILE` (legacy pins) →
 `$XDG_CONFIG_HOME/tardigrada/identity.txt` →
 `~/.config/tardigrada/identity.txt` (the `cuora-identity-file`
 default also resolves legacy `cuora`/`arca` keyfiles). Mode `0600`;

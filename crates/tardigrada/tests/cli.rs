@@ -370,6 +370,31 @@ fn unrecognized_backend_warns_and_defaults_to_keyring() {
 }
 
 #[test]
+fn json_mode_surfaces_warnings_on_stderr() {
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path();
+    // --json suppresses plain notes but NOT warnings: the
+    // misspelled backend must be visible to a machine consumer.
+    let o = tardigrada_env(
+        h,
+        &["--json", "show"],
+        &[
+            ("TARDIGRADA_IDENTITY_BACKEND", "bogus"),
+            ("DBUS_SESSION_BUS_ADDRESS", NO_BUS),
+        ],
+    );
+    assert!(!o.status.success());
+    let err = stderr(&o);
+    assert!(err.contains("\"warning\""), "{err}");
+    assert!(
+        err.contains("unrecognized TARDIGRADA_IDENTITY_BACKEND"),
+        "{err}"
+    );
+    // stdout stays machine-clean — no warning text leaks there.
+    assert!(stdout(&o).is_empty(), "{}", stdout(&o));
+}
+
+#[test]
 fn env_backend_file_roundtrip() {
     let home = tempfile::tempdir().unwrap();
     let h = home.path();

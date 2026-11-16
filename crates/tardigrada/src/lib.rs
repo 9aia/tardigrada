@@ -26,9 +26,14 @@
 //!
 //! Keyfile path resolution: `--identity-file` →
 //! `TARDIGRADA_IDENTITY_FILE` → the `cuora-identity-file` default
-//! (`$XDG_CONFIG_HOME/tardigrada/identity.txt` →
+//! (`$CUORA_IDENTITY_FILE`/`$ARCA_IDENTITY_FILE` legacy overrides,
+//! then `$XDG_CONFIG_HOME/tardigrada/identity.txt` →
 //! `~/.config/tardigrada/identity.txt`, with legacy `cuora`/`arca`
-//! keyfiles resolving first when they exist).
+//! keyfiles resolving first when they exist). Any explicit pin —
+//! flag or env, canonical or legacy — means file and skips the
+//! keyring probe. Env vars are same-uid trust: whoever can set
+//! them can already read the keyfile, so they redirect resolution
+//! freely by design.
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -212,7 +217,7 @@ fn configured_backend(cli: &Cli) -> Backend {
             "auto" => Backend::Auto,
             "file" => Backend::File,
             _ => {
-                note(
+                warn(
                     cli,
                     &format!("unrecognized TARDIGRADA_IDENTITY_BACKEND {v:?} — ignoring"),
                 );
@@ -223,14 +228,25 @@ fn configured_backend(cli: &Cli) -> Backend {
     }
 }
 
-/// An explicit keyfile pin — `--identity-file` or
-/// `TARDIGRADA_IDENTITY_FILE` — always means the file backend and
-/// bypasses the keyring probe entirely (no dbus round-trip).
+/// An explicit keyfile pin — `--identity-file`,
+/// `TARDIGRADA_IDENTITY_FILE`, or the legacy
+/// `CUORA_IDENTITY_FILE`/`ARCA_IDENTITY_FILE` overrides
+/// `FileIdentity::default_path` honors — always means the file
+/// backend and bypasses the keyring probe entirely (no dbus
+/// round-trip). The legacy vars MUST count: cuora treats them as
+/// pins, so ignoring them here would split the two tools onto
+/// different identities.
 fn explicit_pin(cli: &Cli) -> bool {
-    cli.identity_file.as_deref().is_some_and(|p| !p.is_empty())
-        || std::env::var("TARDIGRADA_IDENTITY_FILE")
-            .map(|v| !v.is_empty())
-            .unwrap_or(false)
+    if cli.identity_file.as_deref().is_some_and(|p| !p.is_empty()) {
+        return true;
+    }
+    [
+        "TARDIGRADA_IDENTITY_FILE",
+        "CUORA_IDENTITY_FILE",
+        "ARCA_IDENTITY_FILE",
+    ]
+    .iter()
+    .any(|var| std::env::var(var).map(|v| !v.is_empty()).unwrap_or(false))
 }
 
 /// The resolved identity source plus how it was chosen — verbs
@@ -298,7 +314,15 @@ fn resolve(cli: &Cli) -> Result<Source, Error> {
     let mode = configured_backend(cli);
     if explicit_pin(cli) {
         if mode == Backend::Keyring {
-            note(cli, "explicit identity file pin overrides backend=keyring");
+            let msg = "explicit identity file pin overrides backend=keyring";
+            // A flag is the caller's deliberate choice — a quiet
+            // note. An env pin (TARDIGRADA_/CUORA_/ARCA_) bypassing
+            // the default keyring is the surprising case — warn.
+            if cli.identity_file.as_deref().is_some_and(|p| !p.is_empty()) {
+                note(cli, msg);
+            } else {
+                warn(cli, msg);
+            }
         }
         return Ok(Source::file(cli, mode, true));
     }
@@ -310,7 +334,7 @@ fn resolve(cli: &Cli) -> Result<Source, Error> {
             Err(e) => {
                 // Headless is the expected case — say why the
                 // file was chosen.
-                note(
+                warn(
                     cli,
                     &format!("no session keyring reachable ({e}) — using the identity file"),
                 );
@@ -360,7 +384,7 @@ fn load_main(cli: &Cli, src: &Source) -> Result<x25519::Identity, Error> {
             Ok(None) if src.mode == Backend::Auto => required(&file_fallback(cli)),
             Ok(None) => Err(Error::Missing { path: k.describe() }),
             Err(e) if src.mode == Backend::Auto => {
-                note(
+                warn(
                     cli,
                     &format!("keyring identity unreadable ({e}) — using the identity file"),
                 );
@@ -385,7 +409,7 @@ fn peek(cli: &Cli, src: &Source) -> Result<Option<x25519::Identity>, Error> {
             Ok(None) if src.mode == Backend::Auto => Ok(file_fallback(cli).load()?),
             Ok(None) => Ok(None),
             Err(e) if src.mode == Backend::Auto => {
-                note(
+                warn(
                     cli,
                     &format!("keyring identity unreadable ({e}) — checking the identity file"),
                 );
@@ -432,7 +456,7 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
                         .filter(|old| old.to_public() != id.to_public())
                         .map(|old| old.to_public().to_string());
                     if let Some(old) = &replaced {
-                        note(cli, &format!("replacing existing identity {old}"));
+                        warn(cli, &format!("replacing existing identity {old}"));
                     }
                     src.store(&id)?;
                     note(
@@ -451,9 +475,11 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
                             // is deliberate-or-mistake — say which.
                             // Read failures don't block: `store`
                             // surfaces the real write error.
+                            let mut replaced = None;
                             if let Ok(Some(old)) = dst.load() {
                                 if old.to_public() != id.to_public() {
-                                    note(
+                                    replaced = Some(old.to_public().to_string());
+                                    warn(
                                         cli,
                                         &format!(
                                             "overwriting a different identity at {}",
@@ -464,7 +490,7 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
                             }
                             dst.store(&id)?;
                             note(cli, &format!("exported identity to {}", dst.describe()));
-                            emit_identity(cli, &id, &src, None, None, None);
+                            emit_identity(cli, &id, &src, None, None, replaced);
                         }
                         None => {
                             use age::secrecy::ExposeSecret;
@@ -572,7 +598,7 @@ fn init(cli: &Cli, src: &Source) -> Result<(), Error> {
                     // decrypt.
                     return Err(e.into());
                 }
-                note(
+                warn(
                     cli,
                     &format!("keyring identity unreadable ({e}) — using the identity file"),
                 );
@@ -684,12 +710,13 @@ fn manifest() -> serde_json::Value {
         "about": "the per-machine, per-human age identity behind encrypted stores",
         "verbs": ["init", "show", "import", "export", "backend", "manifest"],
         "globals": {
-            "--json": "stable machine shapes; errors are {\"error\": \"…\"} on stderr",
+            "--json": "stable machine shapes; errors are {\"error\": \"…\"} and warnings {\"warning\": \"…\"} on stderr",
             "--identity-file": "keyfile path override — pins the file backend"
         },
         "env": {
-            "TARDIGRADA_IDENTITY_BACKEND": "keyring (default, fail closed — no file fallback) | auto (keyring → keyfile fallback, headless) | file (never probe the keyring)",
+            "TARDIGRADA_IDENTITY_BACKEND": "keyring (default, fail closed — no file fallback) | auto (keyring → keyfile fallback, headless) | file (never probe the keyring); unrecognized values warn and mean keyring",
             "TARDIGRADA_IDENTITY_FILE": "keyfile path override — pins the file backend",
+            "CUORA_IDENTITY_FILE / ARCA_IDENTITY_FILE": "legacy keyfile pins honored identically — they also pin the file backend (same-uid trust: whoever sets env can read the keyfile anyway)",
             "XDG_CONFIG_HOME": "config root for the default keyfile",
             "CUORA_KEYRING_TIMEOUT_MS": "bounds one keyring op (cuora-identity-keyring); 0 waits forever"
         },
@@ -717,6 +744,20 @@ fn out(s: &str) {
 fn note(cli: &Cli, msg: &str) {
     if !cli.json {
         eprintln!("tardigrada: {msg}");
+    }
+}
+
+/// A warning a machine consumer must still see: `{"warning": …}`
+/// on stderr under `--json` (stdout stays machine-clean), plain
+/// `tardigrada: warning:` otherwise. For conditions that change
+/// what the verb did — a misspelled backend, a keyring→file
+/// downgrade, an identity being replaced — never for routine
+/// context ([`note`] covers that).
+fn warn(cli: &Cli, msg: &str) {
+    if cli.json {
+        eprintln!("{}", json!({ "warning": msg }));
+    } else {
+        eprintln!("tardigrada: warning: {msg}");
     }
 }
 
@@ -870,6 +911,35 @@ mod tests {
                 assert!(explicit_pin(&cli));
             },
         );
+    }
+
+    #[test]
+    fn legacy_env_vars_pin_the_file_backend() {
+        // CUORA_IDENTITY_FILE/ARCA_IDENTITY_FILE are pins for cuora —
+        // tardigrada must honor them identically or the two tools
+        // split onto different identities. The pin short-circuits
+        // before any keyring probe, so no bus is needed.
+        for var in ["CUORA_IDENTITY_FILE", "ARCA_IDENTITY_FILE"] {
+            temp_env::with_vars(
+                [
+                    ("TARDIGRADA_IDENTITY_BACKEND", Some("keyring")),
+                    ("TARDIGRADA_IDENTITY_FILE", None::<&str>),
+                    ("CUORA_IDENTITY_FILE", None::<&str>),
+                    ("ARCA_IDENTITY_FILE", None::<&str>),
+                    ("XDG_CONFIG_HOME", Some("/tmp/xdg")),
+                    ("HOME", Some("/tmp/home")),
+                ],
+                || {
+                    temp_env::with_var(var, Some("/tmp/legacy-pin"), || {
+                        let cli = parse_from(["tardigrada", "backend"]);
+                        let src = resolve(&cli).unwrap();
+                        assert_eq!(src.kind(), "file", "{var}");
+                        assert_eq!(src.describe(), "/tmp/legacy-pin", "{var}");
+                        assert!(src.pinned, "{var}");
+                    });
+                },
+            );
+        }
     }
 
     #[test]
