@@ -443,8 +443,8 @@ dependencies = [
 
 [[package]]
 name = "cuora-identity"
-version = "1.0.2"
-source = "git+ssh://git@github.com/9aia/cuora.git?tag=cuora-v1.0.2#d51293db497f6ef68f4dc974463043d5e8dc9e70"
+version = "1.0.4"
+source = "git+ssh://git@github.com/9aia/cuora.git?tag=cuora-v1.0.4#80dc89411a95ea718acf7f46f44b8b4f6150d090"
 dependencies = [
  "age",
  "thiserror 2.0.21",
@@ -452,19 +452,20 @@ dependencies = [
 
 [[package]]
 name = "cuora-identity-file"
-version = "1.0.2"
-source = "git+ssh://git@github.com/9aia/cuora.git?tag=cuora-v1.0.2#d51293db497f6ef68f4dc974463043d5e8dc9e70"
+version = "1.0.4"
+source = "git+ssh://git@github.com/9aia/cuora.git?tag=cuora-v1.0.4#80dc89411a95ea718acf7f46f44b8b4f6150d090"
 dependencies = [
  "age",
  "cuora-identity",
  "cuora-notice",
  "time",
+ "zeroize",
 ]
 
 [[package]]
 name = "cuora-identity-keyring"
-version = "1.0.2"
-source = "git+ssh://git@github.com/9aia/cuora.git?tag=cuora-v1.0.2#d51293db497f6ef68f4dc974463043d5e8dc9e70"
+version = "1.0.4"
+source = "git+ssh://git@github.com/9aia/cuora.git?tag=cuora-v1.0.4#80dc89411a95ea718acf7f46f44b8b4f6150d090"
 dependencies = [
  "age",
  "apple-native-keyring-store",
@@ -474,12 +475,13 @@ dependencies = [
  "dbus-secret-service-keyring-store",
  "keyring-core",
  "windows-native-keyring-store",
+ "zeroize",
 ]
 
 [[package]]
 name = "cuora-notice"
-version = "1.0.2"
-source = "git+ssh://git@github.com/9aia/cuora.git?tag=cuora-v1.0.2#d51293db497f6ef68f4dc974463043d5e8dc9e70"
+version = "1.0.4"
+source = "git+ssh://git@github.com/9aia/cuora.git?tag=cuora-v1.0.4#80dc89411a95ea718acf7f46f44b8b4f6150d090"
 
 [[package]]
 name = "curve25519-dalek"
@@ -2132,6 +2134,7 @@ version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 
