@@ -50,7 +50,11 @@ stream:
 ```sh
 ssh newmachine 'cat > ~/identity.txt && chmod 600 ~/identity.txt' \
     < <(tardigrada export)
+# on the destination: tardigrada import ~/identity.txt
 ```
+
+The stream holds just the `AGE-SECRET-KEY-…` line — `import` parses
+it fine (comments are optional).
 
 ## Deeper link
 
