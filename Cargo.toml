@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tardigrada",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/9aia/tardigrada"
+description = "Age-identity lifecycle tool — the per-machine, per-human key behind encrypted stores"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[workspace.dependencies]
+tardigrada = { path = "crates/tardigrada", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+sigpipe = "0.1"
+# age (rage's Rust impl) — the fixed crypto choice, same as cuora.
+# default-features off: binary ciphertext, sync API, light dep tree.
+age = { version = "0.12", default-features = false }
+# The identity port + file impl, published by cuora — tardigrada
+# consumes them, it does not copy them.
+cuora-identity = "0.1"
+cuora-identity-file = "0.1"
+tempfile = "3"
+temp-env = "0.3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
