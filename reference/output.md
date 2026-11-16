@@ -28,18 +28,31 @@ surface `--json` and scripts rely on. Verbs and flags:
 - `source` describes it — a keyfile path or the store entry.
 - `init` adds `"created": true|false`; a keyring init that adopted
   an existing keyfile adds `"migrated_from": "<keyfile path>"`.
-- `import` adds `"imported_from": "<keyfile path>"`.
+- `import` adds `"imported_from": "<keyfile path>"` and, when it
+  replaces a *different* stored identity, `"replaced_recipient"`;
+  `export --out` reports the same field when the destination held a
+  different identity.
 - `backend` emits `{"backend","mode","pinned","source"}`:
   `backend` = resolved kind, `mode` = the configured
   `TARDIGRADA_IDENTITY_BACKEND` (`keyring`/`auto`/`file`), `pinned`
-  = an explicit `--identity-file`/`TARDIGRADA_IDENTITY_FILE` is in
-  effect.
+  = an explicit `--identity-file`/`TARDIGRADA_IDENTITY_FILE` (or
+  legacy `CUORA_`/`ARCA_IDENTITY_FILE`) pin is in effect.
 - `manifest` is always JSON (flag or not): verbs, globals, env
   vars, backends, cuora interop note.
 
 Bare `export --json` is **refused** (`export --json needs --out
 PATH`) — a secret inside a JSON envelope invites accidental
 logging. Use `--out` or bare `export` for the pipeable form.
+
+## Warnings
+
+Routine context notes are suppressed under `--json`, but warnings
+are not — conditions that changed what the verb did emit
+`{"warning": "<message>"}` on stderr (plain mode:
+`tardigrada: warning: <message>`). Watch for: backend fallbacks
+(`auto` → keyfile), an env pin overriding `backend=keyring`, an
+unrecognized `TARDIGRADA_IDENTITY_BACKEND`, and identity
+replacements.
 
 ## Errors
 
