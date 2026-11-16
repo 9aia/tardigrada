@@ -53,15 +53,8 @@ through. cuora (secrets broker) consumes the identity for vault
 decryption; tamias (distribution) ships the binary; myco (work
 memory) tracks the ledger; tarsi (release plane) cuts the tags.
 
-## Decisions
+## Neighbors
 
-- **File backend only in v1** — headless, CI-friendly, zero daemon.
-  The keyring impl exists upstream (`cuora-identity-keyring`) but
-  hardcodes the `"cuora"` service name; a tardigrada backend needs
-  upstream parameterization first. Tracked in `project/`.
-- **`export`/`import` over config coupling** — tardigrada manages
-  generic identities; cuora interop is "point at the same file" or
-  "move the keyfile". No cuora-aware verbs.
-- **Payload bin, not a driver shim** — the CLI is small and
-  self-contained; a real binary beats a shim→driver→engine
-  passthrough for a tool this size.
+See [Boundaries](boundaries) for the owns / doesn't-own split and
+the per-neighbor relationship table; [Decisions](decisions) for
+the why behind each of those lines.

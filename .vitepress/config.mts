@@ -31,12 +31,15 @@ export default defineConfig({
         items: [
           { text: "Architecture", link: "/explanation/architecture" },
           { text: "Concepts", link: "/explanation/concepts" },
+          { text: "Boundaries", link: "/explanation/boundaries" },
+          { text: "Decisions", link: "/explanation/decisions" },
         ],
       },
       {
         text: "Reference",
         items: [
           { text: "CLI", link: "/reference/cli" },
+          { text: "Output contract", link: "/reference/output" },
           { text: "Environment variables", link: "/reference/env-vars" },
         ],
       },
