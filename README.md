@@ -6,6 +6,7 @@ to `main`.
 
 ```sh
 bun install        # first time
-bun run docs:dev   # local preview
+bun run docs:dev   # local preview (regenerates reference/cli.md first)
+bun run docs:check # regen + git diff — the freshness gate
 bun run docs:build # → .vitepress/dist
 ```

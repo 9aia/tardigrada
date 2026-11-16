@@ -20,7 +20,7 @@ export TARDIGRADA_IDENTITY_FILE="$HOME/.config/cuora/identity.txt"
 ```
 
 Both tools then read and write the same `identity.txt` — cuora's
-`init`/`identity` verbs and tardigrada's verbs stay in sync.
+`init` and tardigrada's verbs stay in sync.
 
 ### Move the key material
 
@@ -41,8 +41,15 @@ tardigrada export --out ~/.config/cuora/identity.txt
 
 ```sh
 tardigrada show        # age1…
-CUORA_IDENTITY_FILE=~/.config/tardigrada/identity.txt cuora identity show
-                      # the same age1…
+```
+
+cuora has no verb that prints the recipient after `init` — but
+`cuora init` is safe to re-run against an existing keyfile (it
+imports rather than orphaning) and reports it:
+
+```sh
+CUORA_IDENTITY_FILE=~/.config/tardigrada/identity.txt cuora init
+# stderr: recipient: age1…  — the same string tardigrada show prints
 ```
 
 ## Boundary note
