@@ -12,7 +12,7 @@
 # manifest serves every platform `tools/bin/` ships a dir for; a
 # payload with no dir for this host fails the install loudly.
 name: tardigrada
-version: "0.3.0"
+version: "0.4.0"
 type: files
 description: >-
   Age-identity lifecycle tool — the per-machine, per-human key
