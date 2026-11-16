@@ -2,20 +2,29 @@
 
 ADR-lite: decision → alternatives → consequence.
 
-## File backend only in v1
+## Keyring default, fail closed; file opt-out
 
-**Decision:** the only identity backend is `file` — an
-`identity.txt`-style keyfile at the resolved path.
+**Decision:** `TARDIGRADA_IDENTITY_BACKEND` selects the store —
+`keyring` (default: the platform session secret store, entry
+`tardigrada/age-identity`) fails closed when no store is reachable;
+`auto` falls back to the keyfile with a stderr note; `file` never
+probes the store. An explicit `--identity-file`/
+`TARDIGRADA_IDENTITY_FILE` pin always means file.
 
-**Alternatives:** ship a keyring backend now; a daemon or remote
-identity service.
+**Alternatives:** file-only (v1); keyring default with silent
+file fallback; a config file for backend selection.
 
-**Consequence:** headless, CI-friendly, zero moving parts — but the
-key sits on disk (mitigated by `0600` + the load-time permission
-warning). The keyring impl exists upstream
-(`cuora-identity-keyring`) yet hardcodes the `"cuora"` service
-name; a tardigrada backend needs upstream parameterization or a
-thin local impl. Tracked in `project/`.
+**Consequence:** the secret leaves the disk on desktop sessions —
+the keyring unlocks with login, so reads need no prompt and there is
+no `0600` file to leak. Fail-closed means headless/CI must opt out
+explicitly (`auto` or `file`) rather than silently diverging onto a
+keyfile the keyring can't see — the same semantics cuora adopted.
+No config file in v1: one env var covers it, and the explicit pin
+always wins. Keyfiles keep working: `file`/`auto` read them
+(including legacy `cuora`/`arca` paths via the shared
+`cuora-identity-file` resolution), and `init` under
+`keyring`/`auto` adopts a keyfile identity into the store instead
+of orphaning its ciphertext.
 
 ## `export`/`import` over config coupling
 

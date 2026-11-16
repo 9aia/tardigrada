@@ -23,6 +23,7 @@ export default defineConfig({
         text: "How-to",
         items: [
           { text: "Move your identity", link: "/how-to/move-your-identity" },
+          { text: "Switch backends", link: "/how-to/switch-backends" },
           { text: "Share your recipient", link: "/how-to/share-your-recipient" },
           { text: "Point cuora at tardigrada's key", link: "/how-to/cuora-interop" },
         ],

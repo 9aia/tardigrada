@@ -10,22 +10,30 @@ consumers (cuora, tamias sealed packs, rage).
 
 Named for the tardigrade: the animal survives anything by entering
 cryptobiosis — a dormant state it persists through until conditions
-return. The identity sleeps in a keyfile (`0600`) and wakes whenever
-a store needs it; it persists across tools, machines, and years.
+return. The identity sleeps in the platform session keyring (or a
+`0600` keyfile) and wakes whenever a store needs it; it persists
+across tools, machines, and years.
 
 ## Components
 
 ```
 tardigrada (CLI)
-   │  clap parse → dispatch → i32        (crates/tardigrada, lib + thin bin)
+   │  clap parse → backend select → dispatch → i32
+   │  (crates/tardigrada, lib + thin bin)
    ▼
-FileIdentity  ── the keyfile impl (cuora-identity-file, crates.io)
-   │  load: first non-comment line → x25519::Identity
-   │  store: "#" header + AGE-SECRET-KEY-…, mode 0600, fsync
+IdentitySource impls — consumed from cuora, git-pinned cuora-v1.0.2
+   ├─ KeyringIdentity   system keyring entry tardigrada/age-identity
+   │                    (secret-service / Keychain / Credential Manager)
+   └─ FileIdentity      identity.txt keyfile, mode 0600, fsync
    ▼
-identity.txt  ── $TARDIGRADA_IDENTITY_FILE → $XDG_CONFIG_HOME/
-                tardigrada/identity.txt → ~/.config/…
+session keyring  or  identity.txt at the resolved path
 ```
+
+Backend selection mirrors cuora: `TARDIGRADA_IDENTITY_BACKEND` =
+`keyring` (default, fail closed) | `auto` (keyring → keyfile
+fallback) | `file` (keyfile only). An explicit
+`--identity-file`/`TARDIGRADA_IDENTITY_FILE` pin always means file
+and never probes the store.
 
 Single crate, no driver: the command ships as a tamias `type:
 files` pack with a `payload:` bin (`libraries/tardigrada`) — a real
@@ -37,13 +45,17 @@ no `tamias-driver-*` crate.
 
 | Piece | Source |
 | --- | --- |
-| `IdentitySource` port + `ensure()` | `cuora-identity` (crates.io `0.1`) |
-| `FileIdentity` keyfile impl | `cuora-identity-file` (crates.io `0.1`) |
+| `IdentitySource` port + `ensure()` | `cuora-identity` (git `cuora-v1.0.2`) |
+| `FileIdentity` keyfile impl | `cuora-identity-file` (git `cuora-v1.0.2`) |
+| `KeyringIdentity` session-store impl | `cuora-identity-keyring` (git `cuora-v1.0.2`) |
 | `x25519::Identity` | `age` (default-features off) |
 
-`tardigrada` calls `FileIdentity::new(<resolved path>)` — the impl
-is path-agnostic, so tardigrada's `~/.config/tardigrada/` location
-and cuora's `~/.config/cuora/` location are the same code.
+`tardigrada` resolves one `IdentitySource` per run — a
+`KeyringIdentity` or a `FileIdentity` at the resolved path. The
+impls are path-agnostic, so tardigrada's
+`~/.config/tardigrada/` location, cuora's, and the shared
+`tardigrada/age-identity` keyring entry are the same code — and the
+same identity.
 
 ## Where it sits
 

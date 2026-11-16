@@ -2,7 +2,10 @@
 
 Goal: carry your tardigrada identity — and therefore every store it
 unlocks — to a new machine, or adopt a keyfile another tool already
-holds.
+holds. `export`/`import` always move **keyfile** material: `export`
+reads from whichever backend is configured (the session keyring by
+default) and `import` writes to it. To switch *where* the identity
+lives on one machine, see [Switch backends](switch-backends).
 
 ## Prerequisites
 

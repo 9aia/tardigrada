@@ -3,6 +3,11 @@
 Goal: make cuora vaults decrypt with the same identity tardigrada
 manages — one key, one lifecycle, no duplicated keyfiles.
 
+Since cuora canonicalized identity under the tardigrada namespace,
+both tools resolve the **same identity by default**: the
+`tardigrada/age-identity` session-keyring entry, or the shared
+keyfile. The steps below are for pinning an explicit file instead.
+
 ## Two ways
 
 ### Same file (simplest)
@@ -35,7 +40,10 @@ tardigrada export --out ~/.config/cuora/identity.txt
 ```
 
 `export --out` writes the same `identity.txt` format cuora's
-`cuora-identity-file` impl reads — comments and all.
+`cuora-identity-file` impl reads — comments and all. Note `export`
+reads from tardigrada's *configured* backend: under the default
+`keyring` it exports the keyring identity; under `file`/`auto`
+fallback it exports the keyfile's.
 
 ## You should see
 

@@ -4,9 +4,12 @@
 
 The **age identity's lifecycle** — bootstrap (`init`), inspect
 (`show`/`backend`/`manifest`), and movement (`import`/`export`) of
-the single per-machine, per-human keyfile. Plus the keyfile *path*
-convention (`--identity-file` → `TARDIGRADA_IDENTITY_FILE` → XDG →
-`~/.config`) and the `identity.txt` on-disk format it writes.
+the single per-machine, per-human identity. Plus the backend
+selection (`TARDIGRADA_IDENTITY_BACKEND`: `keyring`/`auto`/`file`),
+the keyfile *path* convention (`--identity-file` →
+`TARDIGRADA_IDENTITY_FILE` → the shared `cuora-identity-file`
+default → XDG → `~/.config`), and the `identity.txt` on-disk format
+it writes.
 
 ## Doesn't own
 
@@ -24,10 +27,10 @@ convention (`--identity-file` → `TARDIGRADA_IDENTITY_FILE` → XDG →
 
 | Neighbor | Relationship |
 | --- | --- |
-| **cuora** | consumes age identities for vault decryption. Interop is file-level only: share the keyfile path (`CUORA_IDENTITY_FILE` ↔ `TARDIGRADA_IDENTITY_FILE`) or move material via `export --out`/`import`. No cuora-aware verbs here. |
+| **cuora** | consumes age identities for vault decryption. Interop is storage-level: the same `tardigrada/age-identity` keyring entry, the same keyfile (`CUORA_IDENTITY_FILE` ↔ `TARDIGRADA_IDENTITY_FILE`), or moved material via `export --out`/`import`. No cuora-aware verbs here. |
 | **tamias** | ships the binary — `libraries/tardigrada` pack, `type: files` payload bin staged by `scripts/pack.sh`. |
 | **rage / age ecosystem** | the keyfile format is `identity.txt`-compatible — anything that reads `AGE-SECRET-KEY-…` files interoperates for free. |
-| **cuora-identity-keyring** | upstream keyring impl exists but hardcodes the `"cuora"` service name — a tardigrada keyring backend waits on upstream parameterization (tracked in `project/`). |
+| **cuora-identity-*** | the `IdentitySource` port and both impls (keyfile, platform keyring) are consumed from cuora, git-pinned to `cuora-v1.0.2` — tardigrada never reimplements them. The keyring entry `tardigrada/age-identity` is the canonical namespace both tools share. |
 
 ## The rule of thumb
 
