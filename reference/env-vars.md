@@ -2,13 +2,12 @@
 
 | Var | Read by | Effect |
 | --- | --- | --- |
-| `TARDIGRADA_IDENTITY_BACKEND` | backend selection | `keyring` (default, fail closed) \| `auto` (keyring → keyfile fallback) \| `file` (keyfile only). Unrecognized values are ignored with a stderr note. |
+| `TARDIGRADA_IDENTITY_BACKEND` | backend selection | `keyring` (default, fail closed) \| `auto` (keyring → keyfile fallback) \| `file` (keyfile only). Unrecognized values warn on stderr (`{"warning": …}` under `--json`) and mean `keyring`. |
 | `TARDIGRADA_IDENTITY_FILE` | path resolution + pin | Keyfile path override (empty = ignored). A non-empty value pins the file backend — the keyring is never probed. |
-| `CUORA_IDENTITY_FILE` / `ARCA_IDENTITY_FILE` | `cuora-identity-file` default | Legacy overrides honored by the shared default path resolution (cuora's vars — tardigrada's own pin is `TARDIGRADA_IDENTITY_FILE`). |
+| `CUORA_IDENTITY_FILE` / `ARCA_IDENTITY_FILE` | path resolution + pin | Legacy keyfile pins, honored identically to `TARDIGRADA_IDENTITY_FILE` — a non-empty value pins the file backend so tardigrada and cuora can never split onto different identities. Same-uid trust: whoever can set env can already read the keyfile. |
 | `XDG_CONFIG_HOME` | path resolution | Config root — default keyfile is `$XDG_CONFIG_HOME/tardigrada/identity.txt` |
 | `HOME` | path resolution | Fallback config root `~/.config/…` when `XDG_CONFIG_HOME` is unset |
 | `CUORA_KEYRING_TIMEOUT_MS` | `cuora-identity-keyring` | Bounds one keyring op in ms (`0` waits forever); default 120s. |
-| `CUORA_IDENTITY_FILE` | **cuora**, not tardigrada | Point cuora at tardigrada's keyfile (or vice versa via `TARDIGRADA_IDENTITY_FILE`) |
 
 ## Backend selection
 
@@ -23,9 +22,13 @@
   (with a stderr note on failures). The headless/CI mode.
 - **`file`** — the keyfile only; the store is never probed.
 
-An explicit `--identity-file` flag or `TARDIGRADA_IDENTITY_FILE`
-always means file and wins over every backend mode — no dbus
-round-trip.
+An explicit `--identity-file` flag, `TARDIGRADA_IDENTITY_FILE`, or a
+legacy `CUORA_IDENTITY_FILE`/`ARCA_IDENTITY_FILE` pin always means
+file and wins over every backend mode — no dbus round-trip. An env
+pin under `backend=keyring` (the default) emits a warning; the flag
+is the caller's deliberate choice and stays a quiet note. All env
+vars are same-uid trust — they redirect resolution freely by
+design, not a security boundary.
 
 ## Keyfile path resolution
 
