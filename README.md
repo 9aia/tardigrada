@@ -103,4 +103,5 @@ owns the key's lifecycle.
 - [AGENTS.md](AGENTS.md) — layout, commands, rules
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)
 - [LICENSE](LICENSE) (MIT)
-- `docs/` worktree — VitePress + Diátaxis (orphan `docs` branch)
+- Docs site: <https://9aia.com/tardigrada> — `docs/` worktree,
+  VitePress + Diátaxis (orphan `docs` branch)

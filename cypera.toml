@@ -1,0 +1,11 @@
+# tardigrada — docs/reference generation contract for `cypera`
+# (`cypera gen cli`, discovered upward from --repo). Schema lives in
+# ../cypera crates/cypera-core/src/repo_config.rs.
+
+[cli]
+package = "tardigrada"
+bin = "tardigrada"
+out = "docs/reference/cli.md"
+
+[check]
+profile = "engine"

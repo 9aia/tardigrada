@@ -78,8 +78,10 @@ Deploy the command: `scripts/pack.sh` then `tamias install
 ./libraries/tardigrada` (or `cargo install --path crates/tardigrada`
 for a dev install).
 
-Git hooks: none wired yet — run the four cargo commands above
-before committing.
+Git hooks live in `.hooks/` (`core.hooksPath` = `.hooks`):
+pre-commit runs `cargo fmt --all -- --check`, pre-push runs
+`cargo clippy --workspace --all-targets -- -D warnings &&
+cargo test --workspace`.
 
 ## The worktree anatomy
 
@@ -106,8 +108,12 @@ contents to `main`.
 ## Docs
 
 `docs/` worktree — VitePress + Diátaxis (tutorials/how-to/
-reference/explanation). v1 keeps the site minimal; the README +
-this file carry the full contract until the docs site grows.
+reference/explanation) → GitHub Pages at `9aia.com/tardigrada`.
+`cypera gen cli` (driven by `cypera.toml` `[cli]`) renders
+`docs/reference/cli.md` from `tardigrada --help` — keep the clap
+doc comments in `lib.rs` accurate; they feed the generated
+reference. `bun run docs:check` in `docs/` is the regen-and-diff
+gate; `cypera check` at the root enforces the docs contract.
 
 ## Future work
 
