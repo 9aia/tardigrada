@@ -371,6 +371,31 @@ fn load_main(cli: &Cli, src: &Source) -> Result<x25519::Identity, Error> {
     }
 }
 
+/// Best-effort read of the *current* identity — `import`'s
+/// replace-warning and nothing else. Same backend resolution as
+/// [`load_main`] but `Ok(None)` where `load_main` would raise
+/// `Missing`; read errors still propagate — a blind overwrite is
+/// worse than a failed import.
+fn peek(cli: &Cli, src: &Source) -> Result<Option<x25519::Identity>, Error> {
+    match &src.inner {
+        Inner::File(f) => Ok(f.load()?),
+        Inner::Keyring(k) => match k.load() {
+            Ok(Some(id)) => Ok(Some(id)),
+            // `auto`: an empty store falls through to the keyfile.
+            Ok(None) if src.mode == Backend::Auto => Ok(file_fallback(cli).load()?),
+            Ok(None) => Ok(None),
+            Err(e) if src.mode == Backend::Auto => {
+                note(
+                    cli,
+                    &format!("keyring identity unreadable ({e}) — checking the identity file"),
+                );
+                Ok(file_fallback(cli).load()?)
+            }
+            Err(e) => Err(e.into()),
+        },
+    }
+}
+
 fn execute(cli: &Cli) -> Result<i32, Error> {
     match &cli.command {
         Cmd::Manifest => {
@@ -387,7 +412,7 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
                         cli,
                         &format!("identity: {} (backend {})", src.describe(), src.kind()),
                     );
-                    emit_identity(cli, &id, &src, None, None);
+                    emit_identity(cli, &id, &src, None, None, None);
                 }
                 Cmd::Import { file } => {
                     let from = FileIdentity::new(file);
@@ -399,21 +424,47 @@ fn execute(cli: &Cli) -> Result<i32, Error> {
                             })
                         }
                     };
+                    // `import` overwrites by design — but replacing a
+                    // *different* identity must be visible: name both
+                    // recipients so a wrong-source import is caught
+                    // before the old key is gone for good.
+                    let replaced = peek(cli, &src)?
+                        .filter(|old| old.to_public() != id.to_public())
+                        .map(|old| old.to_public().to_string());
+                    if let Some(old) = &replaced {
+                        note(cli, &format!("replacing existing identity {old}"));
+                    }
                     src.store(&id)?;
                     note(
                         cli,
                         &format!("imported {} → {}", from.describe(), src.describe()),
                     );
-                    emit_identity(cli, &id, &src, Some(from.describe()), None);
+                    emit_identity(cli, &id, &src, Some(from.describe()), None, replaced);
                 }
                 Cmd::Export { out: dest } => {
                     let id = load_main(cli, &src)?;
                     match dest {
                         Some(p) => {
                             let dst = FileIdentity::new(p);
+                            // Same guard as `import`: clobbering a
+                            // *different* identity at the destination
+                            // is deliberate-or-mistake — say which.
+                            // Read failures don't block: `store`
+                            // surfaces the real write error.
+                            if let Ok(Some(old)) = dst.load() {
+                                if old.to_public() != id.to_public() {
+                                    note(
+                                        cli,
+                                        &format!(
+                                            "overwriting a different identity at {}",
+                                            dst.describe()
+                                        ),
+                                    );
+                                }
+                            }
                             dst.store(&id)?;
                             note(cli, &format!("exported identity to {}", dst.describe()));
-                            emit_identity(cli, &id, &src, None, None);
+                            emit_identity(cli, &id, &src, None, None, None);
                         }
                         None => {
                             use age::secrecy::ExposeSecret;
@@ -481,12 +532,12 @@ fn init(cli: &Cli, src: &Source) -> Result<(), Error> {
                     f.describe()
                 ),
             );
-            emit_identity(cli, &id, src, None, Some(created));
+            emit_identity(cli, &id, src, None, Some(created), None);
         }
         Inner::Keyring(k) => match k.load() {
             Ok(Some(id)) => {
                 note(cli, &format!("found identity at {}", k.describe()));
-                emit_identity(cli, &id, src, None, Some(false));
+                emit_identity(cli, &id, src, None, Some(false), None);
             }
             Ok(None) => {
                 // Migration: an existing keyfile identity is
@@ -510,7 +561,7 @@ fn init(cli: &Cli, src: &Source) -> Result<(), Error> {
                                 k.describe()
                             ),
                         );
-                        emit_identity(cli, &id, src, None, Some(created));
+                        emit_identity(cli, &id, src, None, Some(created), None);
                     }
                 }
             }
@@ -538,7 +589,7 @@ fn init(cli: &Cli, src: &Source) -> Result<(), Error> {
                 // Report the source that actually served — the
                 // file, not the unreachable keyring.
                 let file_src = Source::file(cli, src.mode, src.pinned);
-                emit_identity(cli, &id, &file_src, None, Some(created));
+                emit_identity(cli, &id, &file_src, None, Some(created), None);
             }
         },
     }
@@ -592,14 +643,16 @@ pub fn default_identity_path() -> PathBuf {
 }
 
 /// Emit the identity: recipient bare on stdout, `--json` wraps
-/// backend/source (and `created`/`imported_from` when present) in
-/// one object. Context notes go to stderr via [`note`].
+/// backend/source (and `created`/`imported_from`/`replaced_recipient`
+/// when present) in one object. Context notes go to stderr via
+/// [`note`].
 fn emit_identity(
     cli: &Cli,
     id: &x25519::Identity,
     src: &Source,
     from: Option<String>,
     created: Option<bool>,
+    replaced: Option<String>,
 ) {
     let recipient = id.to_public().to_string();
     if cli.json {
@@ -613,6 +666,9 @@ fn emit_identity(
         }
         if let Some(f) = from {
             v["imported_from"] = json!(f);
+        }
+        if let Some(r) = replaced {
+            v["replaced_recipient"] = json!(r);
         }
         out(&v.to_string());
     } else {

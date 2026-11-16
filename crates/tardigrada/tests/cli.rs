@@ -139,6 +139,75 @@ fn init_show_export_import_roundtrip() {
 }
 
 #[test]
+fn import_replacing_a_different_identity_warns() {
+    // Two homes, two distinct identities.
+    let home_a = tempfile::tempdir().unwrap();
+    let o = tardigrada(home_a.path(), &["init"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let recip_a = stdout(&o);
+
+    let home_b = tempfile::tempdir().unwrap();
+    let o = tardigrada(home_b.path(), &["init"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let recip_b = stdout(&o);
+    assert_ne!(recip_a, recip_b);
+
+    // Importing A's keyfile into B replaces a *different* identity —
+    // stderr must name the recipient being replaced.
+    let o = tardigrada(
+        home_b.path(),
+        &["import", keyfile(home_a.path()).to_str().unwrap()],
+    );
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(stdout(&o), recip_a);
+    assert!(
+        stderr(&o).contains("replacing existing identity"),
+        "{}",
+        stderr(&o)
+    );
+    assert!(stderr(&o).contains(&recip_b), "{}", stderr(&o));
+
+    // --json carries the same fact as `replaced_recipient`.
+    let home_c = tempfile::tempdir().unwrap();
+    let o = tardigrada(home_c.path(), &["init"]);
+    let recip_c = stdout(&o);
+    let o = tardigrada(
+        home_c.path(),
+        &["--json", "import", keyfile(home_a.path()).to_str().unwrap()],
+    );
+    assert!(o.status.success(), "{}", stderr(&o));
+    let v: serde_json::Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert_eq!(v["recipient"], recip_a);
+    assert_eq!(v["replaced_recipient"], recip_c);
+}
+
+#[test]
+fn export_out_over_a_different_identity_warns() {
+    let home_a = tempfile::tempdir().unwrap();
+    let o = tardigrada(home_a.path(), &["init"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let recip_a = stdout(&o);
+
+    // home_b's keyfile holds a different identity — exporting A over
+    // it must warn before the old key is gone.
+    let home_b = tempfile::tempdir().unwrap();
+    let o = tardigrada(home_b.path(), &["init"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let dest = keyfile(home_b.path());
+
+    let o = tardigrada(home_a.path(), &["export", "--out", dest.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(
+        stderr(&o).contains("overwriting a different identity"),
+        "{}",
+        stderr(&o)
+    );
+    // The destination now holds A's identity.
+    let o = tardigrada(home_b.path(), &["show"]);
+    assert_eq!(stdout(&o), recip_a);
+}
+
+#[test]
 fn import_missing_file_fails() {
     let home = tempfile::tempdir().unwrap();
     let o = tardigrada(home.path(), &["import", "/nonexistent/keyfile"]);
