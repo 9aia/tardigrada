@@ -764,12 +764,27 @@ fn warn(cli: &Cli, msg: &str) {
 /// Error emit — `{"error": "…"}` on stderr under `--json`, plain
 /// text otherwise; exit 1 either way.
 fn fail(cli: &Cli, msg: &str) -> i32 {
+    let msg = corrected_error(msg);
     if cli.json {
         eprintln!("{}", json!({ "error": msg }));
     } else {
         eprintln!("tardigrada: error: {msg}");
     }
     1
+}
+
+/// cuora-identity-keyring's bounded-op timeout error advises
+/// `CUORA_IDENTITY_BACKEND=file|auto` — cuora's var, which
+/// tardigrada ignores. Left alone, a user whose keyring is locked
+/// sets the wrong variable and stays stuck; append the correction.
+/// (The real fix belongs upstream in cuora; this is the
+/// consumer-side patch until the pinned rev carries it.)
+fn corrected_error(msg: &str) -> String {
+    if msg.contains("CUORA_IDENTITY_BACKEND") {
+        format!("{msg} — for tardigrada, set TARDIGRADA_IDENTITY_BACKEND instead")
+    } else {
+        msg.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -989,6 +1004,20 @@ mod tests {
                 assert!(!src.pinned);
             },
         );
+    }
+
+    #[test]
+    fn keyring_timeout_error_names_tardigradas_env_var() {
+        // cuora-identity-keyring's timeout text points at
+        // CUORA_IDENTITY_BACKEND — tardigrada must correct it.
+        let upstream = "identity store: keyring load timed out after 120s — \
+                        the session store is waiting on an unlock prompt; \
+                        unlock it, or set CUORA_IDENTITY_BACKEND=file|auto";
+        let fixed = corrected_error(upstream);
+        assert!(fixed.contains("TARDIGRADA_IDENTITY_BACKEND"), "{fixed}");
+        assert!(fixed.contains("CUORA_IDENTITY_BACKEND"), "{fixed}");
+        // unrelated errors pass through untouched
+        assert_eq!(corrected_error("no identity at /x"), "no identity at /x");
     }
 
     #[test]
