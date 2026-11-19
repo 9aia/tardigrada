@@ -13,6 +13,6 @@
   "devDependencies": {
     "gh-pages": "^6.3.0",
     "vitepress": "^1.6.3",
-    "vitepress-theme-9aia": "github:9aia/vitepress-theme-9aia#1f15d84b1b0d573ae76b53d9952928d2d082a908"
+    "vitepress-theme-9aia": "github:9aia/vitepress-theme-9aia#707db8167e74d97d650328a432da4ce5cd4729c8"
   }
 }
