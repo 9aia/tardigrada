@@ -47,7 +47,7 @@ Flat `crates/` workspace — one crate today.
 | `scripts/` | `pack.sh` (stage payload), `coverage.sh` (llvm-cov) |
 
 Deps of note: `cuora-identity` + `cuora-identity-file` +
-`cuora-identity-keyring` (git-pinned to `cuora-v1.0.2` — the crates.io
+`cuora-identity-keyring` (git-pinned to `cuora-v1.0.4` — the crates.io
 `0.1` releases are legacy, cuora crates are never published) provide
 the `IdentitySource` port and the keyfile/keyring impls —
 tardigrada consumes them via `FileIdentity::new(<resolved path>)`,
